@@ -1,0 +1,13 @@
+# LearnHarness authoring skill (SDK types, docs, examples). Downloaded locally from
+# the app (Settings → Community plugins → Download authoring skill); build-time only.
+learnharness-plugins/
+
+# Build output and dependencies
+node_modules/
+dist/
+*.zip
+
+# Never commit keys or local plugin data
+data/
+.env
+.env.*
