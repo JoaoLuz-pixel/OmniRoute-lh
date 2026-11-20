@@ -11,3 +11,9 @@ dist/
 data/
 .env
 .env.*
+
+# Plugin SDK types generated from LearnHarness v0.6.1 (npm run sdk)
+.sdk/
+
+# Release zips (attached to GitHub releases, not committed)
+release/

@@ -1,0 +1,75 @@
+/* Every rule is scoped under .orl-root (shared-page CSS isn't sandboxed). */
+.orl-root {
+  --orl-fg: var(--foreground, #111);
+  --orl-bg: var(--background, #fff);
+  --orl-border: var(--border, rgba(127, 127, 127, 0.3));
+  --orl-muted: var(--muted-foreground, color-mix(in oklab, var(--orl-fg) 60%, transparent));
+  --orl-warn: #b45309;
+  --orl-err: #dc2626;
+  --orl-ok: #15803d;
+  color: var(--orl-fg);
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 16px 20px;
+  max-width: 1200px;
+}
+.orl-root h2 { font-size: 20px; margin: 0 0 12px; }
+.orl-root h3 { font-size: 16px; margin: 20px 0 8px; }
+.orl-root h4 { font-size: 14px; margin: 12px 0 6px; }
+.orl-root p { margin: 6px 0; }
+.orl-root code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; padding: 1px 4px; border: 1px solid var(--orl-border); border-radius: 4px; word-break: break-all; }
+.orl-root a { color: inherit; text-decoration: underline; }
+.orl-root .orl-muted { color: var(--orl-muted); font-size: 12.5px; }
+.orl-root .orl-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.orl-root .orl-end { justify-content: flex-end; }
+.orl-root .orl-push { margin-left: auto; }
+.orl-root .orl-callout { border: 1px solid var(--orl-border); border-left: 4px solid var(--orl-warn); border-radius: 6px; padding: 10px 12px; margin: 8px 0 12px; }
+.orl-root .orl-warning { color: var(--orl-warn); }
+.orl-root .orl-error { color: var(--orl-err); white-space: pre-wrap; margin: 8px 0; font-family: inherit; }
+.orl-root .orl-ok { color: var(--orl-ok); font-weight: 600; }
+.orl-root .orl-secret { border: 2px solid var(--orl-warn); border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.orl-root .orl-banner { border: 1px solid var(--orl-border); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
+.orl-root .orl-banner-warn { border-color: var(--orl-warn); background: color-mix(in oklab, var(--orl-warn) 10%, transparent); }
+.orl-root .orl-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--orl-border); margin: 4px 0 12px; overflow-x: auto; }
+.orl-root .orl-tab { background: none; border: none; border-bottom: 2px solid transparent; color: inherit; padding: 8px 12px; cursor: pointer; font: inherit; }
+.orl-root .orl-tab-on { border-bottom-color: currentColor; font-weight: 600; }
+.orl-root .orl-card { border: 1px solid var(--orl-border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+.orl-root .orl-inactive { opacity: 0.6; }
+.orl-root .orl-chip { font-size: 11.5px; border: 1px solid var(--orl-border); border-radius: 999px; padding: 0 8px; }
+.orl-root .orl-chain { margin: 6px 0; padding-left: 22px; }
+.orl-root .orl-chain li { margin: 2px 0; }
+.orl-root .orl-edit-row { display: flex; align-items: center; gap: 6px; }
+.orl-root .orl-edit-row > span { flex: 1; }
+.orl-root .orl-mini { font: inherit; font-size: 12px; padding: 1px 6px; border: 1px solid var(--orl-border); border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.orl-root .orl-mini:disabled { opacity: 0.4; cursor: default; }
+.orl-root .orl-input { font: inherit; width: 100%; box-sizing: border-box; padding: 6px 8px; margin: 4px 0; border: 1px solid var(--orl-border); border-radius: 6px; background: var(--orl-bg); color: inherit; }
+.orl-root .orl-label { display: block; margin: 6px 0; }
+.orl-root .orl-table-wrap { overflow-x: auto; }
+.orl-root .orl-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.orl-root .orl-table th, .orl-root .orl-table td { border-bottom: 1px solid var(--orl-border); padding: 5px 8px; text-align: left; vertical-align: top; }
+.orl-root .orl-table th { cursor: pointer; white-space: nowrap; font-weight: 600; }
+.orl-root .orl-row-err td { color: var(--orl-err); }
+.orl-root .orl-changed td { font-weight: 600; }
+.orl-root .orl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 8px 0; }
+.orl-root .orl-tile { border: 1px solid var(--orl-border); border-radius: 8px; padding: 10px 12px; }
+.orl-root .orl-tile-v { font-size: 20px; font-weight: 600; }
+.orl-root .orl-chart { width: 100%; max-height: 160px; fill: currentColor; opacity: 0.8; }
+.orl-root .orl-conn { display: flex; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--orl-border); }
+.orl-root .orl-dot-on { color: var(--orl-ok); }
+.orl-root .orl-dot-off { color: var(--orl-muted); }
+.orl-root .orl-explorer { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 16px; }
+@media (max-width: 760px) { .orl-root .orl-explorer { grid-template-columns: 1fr; } }
+.orl-root .orl-ex-list { max-height: 60vh; overflow-y: auto; }
+.orl-root .orl-ex-item { display: block; width: 100%; text-align: left; background: none; border: none; color: inherit; font: inherit; font-size: 12.5px; padding: 2px 6px; cursor: pointer; word-break: break-all; }
+.orl-root .orl-ex-main { min-width: 0; }
+.orl-root .orl-json { margin-left: 4px; }
+.orl-root .orl-json summary { cursor: pointer; color: var(--orl-muted); }
+.orl-root .orl-json-body { padding-left: 14px; border-left: 1px dashed var(--orl-border); }
+.orl-root .orl-json-row { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.orl-root .orl-json-key { color: var(--orl-muted); }
+.orl-root .orl-json-string { color: #0e7490; }
+.orl-root .orl-json-number { color: #7c3aed; }
+.orl-root .orl-raw, .orl-root .orl-log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; max-height: 50vh; overflow: auto; border: 1px solid var(--orl-border); border-radius: 6px; padding: 8px; white-space: pre-wrap; }
+.orl-root .orl-log:empty { display: none; }
+.orl-root .orl-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.orl-root .orl-step { border-top: 1px solid var(--orl-border); padding-top: 4px; }
