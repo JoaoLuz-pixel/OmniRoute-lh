@@ -1,0 +1,18 @@
+# Owner decisions (BRIEF section 6)
+
+Recorded 2026-11-20. These override the defaults in BRIEF.md wherever the two differ.
+
+| # | Decision | Answer |
+|---|---|---|
+| 1 | Plugin id / display name | **`omniroute-lh`** / **"OmniRoute for LearnHarness"**. Installed at `<plugins-dir>/omniroute-lh/dist/`. |
+| 2 | Management key storage | **Plugin data folder** (`ctx.dataDirectory`), plain text, file mode 600 where the OS supports it. The README and the settings page must warn that LearnHarness forks with Device Sync ("Plugins & their data") would copy it to the sync endpoint. The key is never sent to the browser part; it is shown masked. |
+| 3 | First release | **Suggested core:** Settings, Set-up guide (creates the OmniRoute-* combos), Routing tab with combo editing, Overview, Recent routing, Explorer, and the one-manual-step banner and check. **Later:** Usage charts, Models, Providers, Cache, Keys, the per-chat routing panel, and the autopilot. |
+| 4 | Recent routing filter | **LearnHarness only by default, with a toggle for all traffic.** Filter by the name of LearnHarness's inference key, which the user enters in settings (`call-logs?apiKey=`). |
+| 5a | Write actions | **All four:** edit the plugin's own combos; edit **any** combo (extra warning for combos the plugin didn't create); **delete** combos (extra confirmation); **toggle** provider connections (extra warning: shared with every OmniRoute client). Every write is confirmed before → after, re-read afterwards, and logged with revert. **Key writes are never offered.** The autopilot (4.6) still changes only plugin-owned combos, automatically. |
+| 5b | Plugin-owned combo names | **`OmniRoute-Strong`, `OmniRoute-Cheap`, `OmniRoute-Vision`**. Role overrides follow the same pattern: `OmniRoute-Researcher`, `OmniRoute-DemoBuilder`, `OmniRoute-VisualMaker`, `OmniRoute-Extractor`, `OmniRoute-Auditor`, `OmniRoute-SideQuestion`. The plugin tracks ownership **by combo id** in its data file, not by name prefix. If a combo with that name already exists and the plugin doesn't own it, ask the user whether to adopt it or pick another name. |
+| 6 | Autopilot defaults | *Open.* Not needed for the first release; ask before building the autopilot. |
+| 7 | Publishing | **GitHub releases of this repo.** Each release attaches `omniroute-lh-<version>.zip` containing `omniroute-lh/dist/…`, which users extract into `<plugins-dir>/` (built by `npm run release`). A release script builds the zip; publishing happens only when the owner asks. |
+| 8 | Managed OmniRoute (BRIEF 4.8) | **In the first release.** Default mode: **managed with auto-detect.** If an OmniRoute is already running at the address, the plugin uses it and never stops it; otherwise it installs (after confirmation), starts it with the app and stops it with the app (watchdog). Install target: **a plugin-owned folder outside LearnHarness data** (Windows `%LOCALAPPDATA%\omniroute-lh\runtime`; macOS `~/Library/Application Support/omniroute-lh/runtime`; Linux `${XDG_DATA_HOME:-~/.local/share}/omniroute-lh/runtime`). OmniRoute data: **the shared default `~/.omniroute`** (`DATA_DIR` not overridden). Option "Keep OmniRoute running after LearnHarness closes" is off by default. |
+| 9 | First-run keys and password | **The plugin creates both keys** (LearnHarness inference key + management key) on a fresh OmniRoute through the loopback bootstrap, after confirmation. This is the only key write the plugin ever makes. It then **generates a strong dashboard password**, shows it once with a copy button, and stores it with the management key in plugin data. The inference key is shown with a copy button in the one manual step (LearnHarness's Custom endpoint needs it). |
+
+License: AGPL-3.0 (this repo's `LICENSE`).
