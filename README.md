@@ -6,7 +6,7 @@ A LearnHarness community plugin (`omniroute-lh`) that routes LearnHarness's agen
 >
 > The plugin can't change LearnHarness's own settings (the plugin API doesn't allow it). After the plugin has set OmniRoute up, you do this **once** in LearnHarness:
 >
-> **Settings → Providers → Custom endpoint**
+> **Settings → Providers → Model API keys → + Add a provider → Custom endpoint**
 > - Base URL: `http://127.0.0.1:20128/v1`. Keep the `/v1`; LearnHarness doesn't add it.
 > - Mode: **API key**, using the LearnHarness key (the set-up guide has a copy button).
 > - Click **Connect**, again if it was already connected. LearnHarness reads OmniRoute's model list only when you connect, so combos created later only appear after you reconnect. If they still don't show, add `OmniRoute-Strong, OmniRoute-Cheap, OmniRoute-Vision` as manual model IDs.

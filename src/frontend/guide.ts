@@ -258,8 +258,8 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     if (state.hasInferenceKey) copyButton(ctx, keyRow, async () => (await rpc<{ key: string }>("keys.revealInference")).key, signal, "Copy key");
     const picks = h("ul", {}, ...state.plans.map((p) => h("li", {}, `${TARGET_LABEL[p.target]} → `, h("code", {}, p.comboName))));
     s5.append(
-      h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Custom endpoint."),
-      h("ol", {}, h("li", {}, urlRow, h("span", { class: "orl-muted" }, "LearnHarness doesn't add /v1 itself — keep it.")), h("li", {}, "Mode: API key."), h("li", {}, keyRow), h("li", {}, h("strong", {}, "Click Connect"), " — also if it's already connected. LearnHarness reads OmniRoute's model list only when you click Connect, so combos created later don't show up until you do."), h("li", {}, "Set the models:", picks)),
+      h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Model API keys → + Add a provider → Custom endpoint."),
+      h("ol", {}, h("li", {}, urlRow, h("span", { class: "orl-muted" }, "LearnHarness doesn't add /v1 itself — keep it.")), h("li", {}, "Authentication: API key."), h("li", {}, keyRow), h("li", {}, h("strong", {}, "Click Connect"), ". Once connected it shows up as a “Custom endpoint” row in Model API keys; to reconnect later, open that row and click Connect again. LearnHarness reads OmniRoute's model list only when you click Connect, so combos created later don't show up until you do."), h("li", {}, "Set the models:", picks)),
       (() => {
         const ids = state.plans.map((p) => p.comboName).join(", ");
         const row = h("div", { class: "orl-row" }, h("span", { class: "orl-muted" }, "Still not in the model list? Add them in the Custom endpoint's manual model IDs field: "), h("code", {}, ids));

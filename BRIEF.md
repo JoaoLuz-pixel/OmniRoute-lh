@@ -99,7 +99,7 @@ If a LearnHarness checkout is available, the guide as it was in v0.6.1 is `git s
 ### 4.2 "Set up OmniRoute" guide (a view or dialog)
 Step by step, with a copy button for the address:
 1. In OmniRoute: create an inference key for LearnHarness, and a separate manage-scoped key for this plugin.
-2. In LearnHarness: Settings → Providers → **Custom endpoint**. Base URL `http://<host>:20128/v1` (LearnHarness does not append `/v1`), mode **API key**, the inference key.
+2. In LearnHarness: Settings → Providers → Model API keys → **+ Add a provider** → **Custom endpoint**. Base URL `http://<host>:20128/v1` (LearnHarness does not append `/v1`), mode **API key**, the inference key.
 3. Optionally let the plugin **create the LearnHarness combos** (one per role), starting from a sensible default chain the user can edit first. Show exactly what will be created and ask for confirmation. Skip any that already exist.
 4. Connect, then pick those combos for the Strong, Cheap and Vision models.
 5. List all combos the plugin found (from `/v1/models` or `/api/combos`), marking the LearnHarness ones, so the user knows which names to pick.
@@ -166,7 +166,7 @@ This is read-only. It cannot change LearnHarness settings or see credentials. A 
 - Any write outside `OmniRoute-*` combos still needs explicit confirmation.
 
 **Disclosure of the one manual step (required).** The plugin can do everything else, but only the user can point LearnHarness's model settings at the `OmniRoute-*` combos. Say this plainly and early, everywhere it matters:
-- **README:** near the top, in a short "One manual step required" box: what to change in LearnHarness (Settings → Providers → Custom endpoint, then the Strong/Cheap/Vision models and any role overrides set to the `OmniRoute-*` combos), why the plugin can't do it (the plugin API can't change LearnHarness settings), and that it is needed only once.
+- **README:** near the top, in a short "One manual step required" box: what to change in LearnHarness (Settings → Providers → Model API keys → + Add a provider → Custom endpoint, then the Strong/Cheap/Vision models and any role overrides set to the `OmniRoute-*` combos), why the plugin can't do it (the plugin API can't change LearnHarness settings), and that it is needed only once.
 - **Plugin description in the manifest** and the **settings page:** one sentence saying the same.
 - **Set-up guide:** a dedicated step with the exact values to pick and copy buttons, then an automatic check through the catalog.
 - **Main view:** until the check passes, a persistent banner: "Routing is not active yet: LearnHarness still uses <models>. Complete the one manual step." with a button that opens the guide. If the check later fails again (the user switched a slot back), the banner returns and names which slot or role.

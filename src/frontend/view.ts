@@ -76,7 +76,7 @@ export function mountView(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLE
             "div",
             { class: "orl-banner orl-banner-warn" },
             h("strong", {}, "Routing is not active yet. "),
-            `LearnHarness still uses ${list || "its own models"}. Complete the one manual step: in Settings → Providers → Custom endpoint, click Connect (again if needed, so the OmniRoute-* combos appear), then pick them as your models. `,
+            `LearnHarness still uses ${list || "its own models"}. Complete the one manual step: in Settings → Providers → Model API keys → + Add a provider → Custom endpoint, click Connect (again if needed, so the OmniRoute-* combos appear), then pick them as your models. `,
             link("Show me how")
           )
         );

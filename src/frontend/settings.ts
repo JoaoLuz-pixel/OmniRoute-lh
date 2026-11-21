@@ -13,7 +13,7 @@ export function mountSettings(ctx: PluginFrontendContext, rpc: Rpc, container: H
     "div",
     { class: "orl-callout" },
     h("strong", {}, "One manual step required. "),
-    "After set-up, point LearnHarness's models at the OmniRoute-* combos in Settings → Providers → Custom endpoint. The plugin can't change LearnHarness settings, so this is the only thing you do by hand, once. ",
+    "After set-up, point LearnHarness's models at the OmniRoute-* combos in Settings → Providers → Model API keys → + Add a provider → Custom endpoint. The plugin can't change LearnHarness settings, so this is the only thing you do by hand, once. ",
     h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), openGuide(ctx, rpc)) }, "Open the set-up guide")
   );
   const rowsHost = h("div", {});
