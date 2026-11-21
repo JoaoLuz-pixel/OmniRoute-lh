@@ -9,11 +9,14 @@ A LearnHarness community plugin (`omniroute-lh`) that routes LearnHarness's agen
 > **Settings → Providers → Custom endpoint**
 > - Base URL: `http://127.0.0.1:20128/v1`. Keep the `/v1`; LearnHarness doesn't add it.
 > - Mode: **API key**, using the LearnHarness key (the set-up guide has a copy button).
+> - Click **Connect**, again if it was already connected. LearnHarness reads OmniRoute's model list only when you connect, so combos created later only appear after you reconnect. If they still don't show, add `OmniRoute-Strong, OmniRoute-Cheap, OmniRoute-Vision` as manual model IDs.
 > - Set the **Strong / Cheap / Vision** models (and any role overrides) to `OmniRoute-Strong`, `OmniRoute-Cheap`, `OmniRoute-Vision` (…).
 >
 > Until you do this, routing isn't active, and the plugin shows a banner saying so. Chats that already chose their own model keep it.
 
 Works with **LearnHarness 0.6.1 and later**, upstream or forks. It uses only plugin API v1 as it was in 0.6.1, and is type-checked against those exact types.
+
+Your AI accounts (Claude Code, GitHub Copilot, API keys, …) must also be connected **in OmniRoute's dashboard** (Providers). The plugin can't copy LearnHarness's logins into OmniRoute.
 
 ## What it does
 

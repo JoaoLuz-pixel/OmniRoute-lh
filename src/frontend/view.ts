@@ -76,7 +76,7 @@ export function mountView(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLE
             "div",
             { class: "orl-banner orl-banner-warn" },
             h("strong", {}, "Routing is not active yet. "),
-            `LearnHarness still uses ${list || "its own models"}. Complete the one manual step (point LearnHarness's models at the OmniRoute-* combos). `,
+            `LearnHarness still uses ${list || "its own models"}. Complete the one manual step: in Settings → Providers → Custom endpoint, click Connect (again if needed, so the OmniRoute-* combos appear), then pick them as your models. `,
             link("Show me how")
           )
         );
@@ -120,6 +120,10 @@ export function mountView(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLE
     host.append(h("h3", {}, "Provider connections"), h("p", { class: "orl-muted" }, "Shared by every OmniRoute client. Turning one off stops all routing through it."), conns);
     try {
       const list = await rpc<{ id: string; provider: string; name: string; isActive: boolean; testStatus: string | null; lastError: string | null; rateLimitedUntil: string | null }[]>("connections.list");
+      if (!list.some((c) => c.isActive)) {
+        const dash = `${(await rpc<{ settings: PublicSettings }>("settings.get")).settings.baseUrl}/dashboard`;
+        conns.append(h("p", { class: "orl-warning" }, "No AI accounts are connected in OmniRoute, so the combos above can't reach any model. Connect your accounts in OmniRoute's dashboard (Providers): ", h("a", { href: dash, target: "_blank", rel: "noopener noreferrer" }, dash)));
+      }
       for (const c of list) {
         const row = h("div", { class: "orl-conn" }, h("span", { class: c.isActive ? "orl-dot-on" : "orl-dot-off" }, "●"), h("span", {}, `${c.provider} · ${c.name}`));
         if (c.rateLimitedUntil) row.append(h("span", { class: "orl-muted" }, ` rate-limited until ${fmt.time(c.rateLimitedUntil)}`));

@@ -124,10 +124,12 @@ export async function activate(ctx: PluginBackendContext) {
     const login = await loginState(s.baseUrl, ctx.signal).catch(() => null);
     let models: string[] = [];
     let combos: ComboSummary[] = [];
+    let connections: { provider: string; name: string; isActive: boolean }[] = [];
     if (s.managementKey) {
       try {
         const c = client();
         combos = (await listCombos(c)).map((x) => summarise(x, owned()));
+        connections = (await listConnections(c)).map(({ provider, name, isActive }) => ({ provider, name, isActive }));
         const m = asRecord(await c.getJson("/v1/models"), "model list");
         models = asArray(m.data, "model list").flatMap((x) => (x && typeof x === "object" && typeof (x as { id?: unknown }).id === "string" ? [(x as { id: string }).id] : []));
       } catch {
@@ -147,6 +149,7 @@ export async function activate(ctx: PluginBackendContext) {
       login,
       hasManagementKey: !!s.managementKey,
       hasInferenceKey: !!s.inferenceKey,
+      connections,
       baseUrl: s.baseUrl,
       customEndpointUrl: `${s.baseUrl}/v1`,
       snapshotAt: st.snapshotAt,
