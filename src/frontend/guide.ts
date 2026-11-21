@@ -116,8 +116,8 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     );
     if (revealedPassword) {
       const pw = revealedPassword;
-      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password (sign in at " + state.baseUrl + "/dashboard) — save it in your password manager now. It won't be shown again after you close this guide."), h("code", {}, pw));
-      copyButton(ctx, shown, () => pw, signal);
+      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password (for signing in at " + state.baseUrl + "/dashboard). This is NOT the API key for LearnHarness — that one starts with sk- and is in the last step. Save the password in your password manager now; it won't be shown again after you close this guide."), h("code", {}, pw));
+      copyButton(ctx, shown, () => pw, signal, "Copy password");
       root.append(shown);
     }
 
@@ -255,7 +255,16 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     const urlRow = h("div", { class: "orl-row" }, h("span", {}, "Base URL: "), h("code", {}, state.customEndpointUrl));
     copyButton(ctx, urlRow, () => state.customEndpointUrl, signal);
     const keyRow = h("div", { class: "orl-row" }, h("span", {}, "API key: "), h("code", {}, state.hasInferenceKey ? "LearnHarness key (hidden)" : "the key you created for LearnHarness"));
-    if (state.hasInferenceKey) copyButton(ctx, keyRow, async () => (await rpc<{ key: string }>("keys.revealInference")).key, signal, "Copy key");
+    if (state.hasInferenceKey) {
+      copyButton(ctx, keyRow, async () => (await rpc<{ key: string }>("keys.revealInference")).key, signal, "Copy LearnHarness API key (sk-…)");
+      const checkOut = h("span", { class: "orl-muted", role: "status" });
+      button(keyRow, "Check key", async () => {
+        checkOut.textContent = "Checking…";
+        const r = await rpc<{ ok: boolean; detail: string }>("keys.testInference");
+        checkOut.textContent = (r.ok ? "✓ " : "✗ ") + r.detail;
+      }, "outline");
+      keyRow.append(checkOut);
+    }
     const picks = h("ul", {}, ...state.plans.map((p) => h("li", {}, `${TARGET_LABEL[p.target]} → `, h("code", {}, p.comboName))));
     s5.append(
       h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Model API keys → + Add a provider → Custom endpoint."),

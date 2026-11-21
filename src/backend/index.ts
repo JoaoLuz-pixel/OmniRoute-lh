@@ -91,6 +91,20 @@ export async function activate(ctx: PluginBackendContext) {
     return testConnection(typeof input.baseUrl === "string" && input.baseUrl ? input.baseUrl.replace(/\/+$/, "") : s.baseUrl, s.managementKey, ctx.signal);
   });
   /** Explicit user click in the manual step: LearnHarness's Custom endpoint needs this key. */
+  /** Same call LearnHarness's Custom endpoint makes on Connect: GET <base>/v1/models with the key. */
+  handle("keys.testInference", async () => {
+    const s = settings.get();
+    if (!s.inferenceKey) return { ok: false, detail: "No LearnHarness key is stored in the plugin." };
+    const c = new OmniRouteClient({ baseUrl: s.baseUrl, key: s.inferenceKey, signal: ctx.signal, timeoutMs: 10_000 });
+    try {
+      const body = asRecord(await c.getJson("/v1/models"), "model list");
+      const ids = asArray(body.data, "model list").flatMap((m) => (m && typeof m === "object" && typeof (m as { id?: unknown }).id === "string" ? [(m as { id: string }).id] : []));
+      const combos = ids.filter((id) => /^OmniRoute-/.test(id));
+      return { ok: true, detail: `OmniRoute accepts this key and lists ${ids.length} models${combos.length ? `, including ${combos.join(", ")}` : ""}. Paste exactly this key in LearnHarness.` };
+    } catch (error) {
+      return { ok: false, detail: (error as Error).message };
+    }
+  });
   handle("keys.revealInference", () => {
     const k = settings.get().inferenceKey;
     if (!k) throw new OmniRouteError("not-configured", "No LearnHarness inference key is stored. Paste the one you created in OmniRoute into the settings.");
