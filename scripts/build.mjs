@@ -30,7 +30,7 @@ const results = await Promise.all([
 ]);
 for (const r of results) {
   for (const input of Object.keys(r.metafile.inputs)) {
-    if (!input.startsWith("src/")) throw new Error(`Unexpected runtime input in bundle: ${input} (only type-only SDK imports are allowed)`);
+    if (!input.startsWith("src/") && !input.startsWith("node_modules/fflate/")) throw new Error(`Unexpected runtime input in bundle: ${input} (only type-only SDK imports are allowed)`);
   }
 }
 for (const [from, to] of [["manifest.json", "manifest.json"], ["src/frontend/styles.css", "styles.css"], ["README.md", "README.md"], ["LICENSE", "LICENSE"]]) {

@@ -16,6 +16,7 @@ interface SetupState {
   login: { bootstrapWindow: boolean; hasPassword: boolean } | null;
   hasManagementKey: boolean;
   hasInferenceKey: boolean;
+  connections: { provider: string; name: string; isActive: boolean }[];
   baseUrl: string;
   customEndpointUrl: string;
   snapshotAt: string | null;
@@ -110,13 +111,13 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
         "p",
         { class: "orl-callout" },
         h("strong", {}, "Heads-up: one step is manual. "),
-        "The plugin can install and run OmniRoute, create its keys and build the routing combos, but it cannot change LearnHarness's own model settings. In step 5 you point LearnHarness at the combos yourself, once. Until then routing isn't active."
+        "The plugin can install and run OmniRoute, create its keys and build the routing combos, but it cannot change LearnHarness's own model settings. In step 6 you point LearnHarness at the combos yourself, once. Until then routing isn't active."
       )
     );
     if (revealedPassword) {
       const pw = revealedPassword;
-      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password — save it in your password manager now. It won't be shown again after you close this guide."), h("code", {}, pw));
-      copyButton(ctx, shown, () => pw, signal);
+      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password (for signing in at " + state.baseUrl + "/dashboard). This is NOT the API key for LearnHarness — that one starts with sk- and is in the last step. Save the password in your password manager now; it won't be shown again after you close this guide."), h("code", {}, pw));
+      copyButton(ctx, shown, () => pw, signal, "Copy password");
       root.append(shown);
     }
 
@@ -151,25 +152,50 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     // 2. Keys
     const s2 = h("div", {});
     if (state.hasManagementKey) s2.append(h("p", {}, "✓ The plugin has a management key."));
-    else if (state.login?.bootstrapWindow) {
-      s2.append(h("p", {}, "This OmniRoute is brand new. The plugin can finish its set-up: set a dashboard password, then create LearnHarness's key and a management key for the plugin."));
-      const row = h("div", { class: "orl-row" });
-      s2.append(row);
-      button(row, "Set up OmniRoute for me", async () => {
-        if (!(await confirmDialog(ctx, { title: "Set up this OmniRoute?", body: ["Sets a strong random dashboard password (shown once).", 'Creates two keys: "LearnHarness" (for LearnHarness\'s Custom endpoint) and "LearnHarness plugin (manage)" (for this plugin).', "This is the only time the plugin creates keys."], confirm: "Set up" }))) return;
-        const r = await rpc<{ password: string; inferenceKey: string }>("setup.bootstrap");
-        revealedPassword = r.password;
-        await render();
-      });
-    } else
+    else {
       s2.append(
-        h("p", {}, "This OmniRoute is already set up. In its dashboard (API keys), create a key with the manage scope for this plugin and a normal key named \"LearnHarness\", then paste them in the plugin settings."),
-        h("p", {}, h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), ctx.app.openSettings()) }, "Open plugin settings"))
+        h("p", {}, 'The plugin creates two OmniRoute keys: "LearnHarness" (for LearnHarness\'s Custom endpoint) and "LearnHarness plugin (manage)" (for itself). It signs in to OmniRoute\'s dashboard once to do that.'),
+        h("p", { class: "orl-muted" }, "If OmniRoute still has its shipped default password (CHANGEME) or none at all, the plugin replaces it with a strong random one and shows it to you once.")
       );
+      const pw = h("input", { class: "orl-input", type: "password", autocomplete: "off", placeholder: "Only if you set your own OmniRoute dashboard password", "aria-label": "OmniRoute dashboard password (optional)" }) as HTMLInputElement;
+      const err = h("p", { class: "orl-error", role: "alert" });
+      const row = h("div", { class: "orl-row" });
+      s2.append(h("label", { class: "orl-label" }, "Your OmniRoute dashboard password (optional, not stored):", pw), row, err);
+      button(row, "Set up OmniRoute for me", async () => {
+        if (!(await confirmDialog(ctx, { title: "Create the keys in OmniRoute?", body: ['Creates two keys: "LearnHarness" and "LearnHarness plugin (manage)".', "Replaces OmniRoute's dashboard password only if it is the shipped default (CHANGEME) or missing; the new one is shown once.", "This is the only time the plugin creates keys."], confirm: "Set up" }))) return;
+        err.textContent = "";
+        try {
+          const r = await rpc<{ password: string | null; replacedDefaultPassword: boolean }>("setup.bootstrap", { password: pw.value || undefined });
+          pw.value = "";
+          if (r.password) revealedPassword = r.password;
+          await render();
+        } catch (e) {
+          err.textContent = (e as Error).message;
+        }
+      });
+      s2.append(h("p", { class: "orl-muted" }, "Prefer to do it yourself? Create the two keys in OmniRoute's dashboard and paste them in the ", h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), ctx.app.openSettings()) }, "plugin settings"), "."));
+    }
     root.append(section(2, "Keys", s2));
     if (!state.hasManagementKey) return;
 
-    // 3. Snapshot of the user's models
+    // 3. AI accounts inside OmniRoute (the plugin can't copy LearnHarness's logins)
+    const s3a = h("div", {});
+    const dash = `${state.baseUrl}/dashboard`;
+    const active = state.connections.filter((c) => c.isActive);
+    s3a.append(
+      h("p", {}, "OmniRoute needs its own connections to your AI accounts. Those you use in LearnHarness (for example Claude Code or GitHub Copilot) have to be connected in OmniRoute too: the plugin can't copy LearnHarness's logins."),
+      active.length
+        ? h("p", { class: "orl-ok" }, `✓ ${active.length} connected: ${active.map((c) => `${c.provider} · ${c.name}`).slice(0, 6).join(", ")}`)
+        : h("p", { class: "orl-warning" }, "No accounts are connected in OmniRoute yet, so the combos have nothing to route to."),
+      h("p", {}, "Open OmniRoute's dashboard → Providers, connect your accounts, then come back and click “Check again”: ", h("a", { href: dash, target: "_blank", rel: "noopener noreferrer" }, dash))
+    );
+    const r3a = h("div", { class: "orl-row" });
+    s3a.append(r3a);
+    copyButton(ctx, r3a, () => dash, signal, "Copy dashboard address");
+    button(r3a, "Check again", () => render(), "outline");
+    root.append(section(3, "Connect your AI accounts in OmniRoute", s3a));
+
+    // 4. Snapshot of the user's models
     const s3 = h("div", {});
     s3.append(h("p", {}, "The plugin keeps a copy of the models you use in LearnHarness now, so they stay first in your routing after you switch to OmniRoute."));
     const t = h("table", { class: "orl-table" }, h("thead", {}, h("tr", {}, h("th", {}, "LearnHarness"), h("th", {}, "Your model"), h("th", {}, "Combo"))));
@@ -183,9 +209,9 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
       await rpc("setup.snapshot");
       await render();
     }, state.snapshotAt ? "outline" : "default");
-    root.append(section(3, "Your current models", s3));
+    root.append(section(4, "Your current models", s3));
 
-    // 4. Combos
+    // 5. Combos
     const s4 = h("div", {});
     for (const p of state.plans) {
       const card = h("div", { class: "orl-card" }, h("h4", {}, `${p.comboName} — ${TARGET_LABEL[p.target]}`));
@@ -220,27 +246,52 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
       }
       s4.append(card);
     }
-    root.append(section(4, "Routing combos", s4));
+    root.append(section(5, "Routing combos", s4));
     const allReady = state.plans.every((p) => p.existing);
     if (!allReady) return;
 
-    // 5. The one manual step
+    // 6. The one manual step
     const s5 = h("div", {});
     const urlRow = h("div", { class: "orl-row" }, h("span", {}, "Base URL: "), h("code", {}, state.customEndpointUrl));
     copyButton(ctx, urlRow, () => state.customEndpointUrl, signal);
     const keyRow = h("div", { class: "orl-row" }, h("span", {}, "API key: "), h("code", {}, state.hasInferenceKey ? "LearnHarness key (hidden)" : "the key you created for LearnHarness"));
-    if (state.hasInferenceKey) copyButton(ctx, keyRow, async () => (await rpc<{ key: string }>("keys.revealInference")).key, signal, "Copy key");
+    if (state.hasInferenceKey) {
+      copyButton(ctx, keyRow, async () => (await rpc<{ key: string }>("keys.revealInference")).key, signal, "Copy LearnHarness API key (sk-…)");
+      const checkOut = h("span", { class: "orl-muted", role: "status" });
+      button(keyRow, "Check key", async () => {
+        checkOut.textContent = "Checking…";
+        const r = await rpc<{ ok: boolean; detail: string }>("keys.testInference");
+        checkOut.textContent = (r.ok ? "✓ " : "✗ ") + r.detail;
+      }, "outline");
+      keyRow.append(checkOut);
+    }
+    // Only the plugin's combos should show up in LearnHarness's model picker.
+    const scopeRow = h("div", { class: "orl-row" });
+    const scopeOut = h("span", { class: "orl-muted", role: "status" }, "LearnHarness's key is limited to the plugin's combos, so after you Connect, LearnHarness lists only those models.");
+    button(scopeRow, "Apply now", async () => {
+      scopeOut.textContent = "Applying…";
+      const r = await rpc<{ changed: boolean; combos: string[] }>("keys.syncScope");
+      scopeOut.textContent = `${r.changed ? "Done" : "Already set"}: LearnHarness's key can only see ${r.combos.join(", ")}. If LearnHarness still lists other OmniRoute models, open the Custom endpoint row and click Connect again.`;
+    }, "outline");
+    scopeRow.append(scopeOut);
     const picks = h("ul", {}, ...state.plans.map((p) => h("li", {}, `${TARGET_LABEL[p.target]} → `, h("code", {}, p.comboName))));
     s5.append(
-      h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Custom endpoint."),
-      h("ol", {}, h("li", {}, urlRow, h("span", { class: "orl-muted" }, "LearnHarness doesn't add /v1 itself — keep it.")), h("li", {}, "Mode: API key."), h("li", {}, keyRow), h("li", {}, "Connect, then set the models:", picks)),
+      h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Model API keys → + Add a provider → Custom endpoint."),
+      h("ol", {}, h("li", {}, urlRow, h("span", { class: "orl-muted" }, "LearnHarness doesn't add /v1 itself — keep it.")), h("li", {}, "Authentication: API key."), h("li", {}, keyRow), h("li", {}, h("strong", {}, "Click Connect"), ". Once connected it shows up as a “Custom endpoint” row in Model API keys; to reconnect later, open that row and click Connect again. LearnHarness reads OmniRoute's model list only when you click Connect, so combos created later don't show up until you do."), h("li", {}, "Set the models:", picks)),
+      (() => {
+        const ids = state.plans.map((p) => p.comboName).join(", ");
+        const row = h("div", { class: "orl-row" }, h("span", { class: "orl-muted" }, "Still not in the model list? Add them in the Custom endpoint's manual model IDs field: "), h("code", {}, ids));
+        copyButton(ctx, row, () => ids, signal);
+        return row;
+      })(),
+      scopeRow,
       h("p", { class: "orl-muted" }, "Chats that already chose their own model keep it. The OmniRoute screen lists them after their next reply.")
     );
     const check = state.manualStep;
     const s5status = check?.complete
       ? h("p", { class: "orl-ok" }, "✓ Done — LearnHarness now routes through OmniRoute.")
       : h("div", { class: "orl-warning" }, h("p", {}, "Not done yet. Still to change:"), h("ul", {}, ...(check?.pending ?? []).map((p) => h("li", {}, `${TARGET_LABEL[p.target]}: now ${p.current ?? "unset"} → set to ${p.expected}`))));
-    root.append(section(5, "The one manual step (in LearnHarness)", s5, s5status));
+    root.append(section(6, "The one manual step (in LearnHarness)", s5, s5status));
     const done = h("div", { class: "orl-row" });
     root.append(done);
     button(done, "Check again", () => render(), "outline");

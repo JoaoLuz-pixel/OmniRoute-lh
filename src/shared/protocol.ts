@@ -158,7 +158,7 @@ export interface ExplorerEndpoint {
 export interface ChangeLogEntry {
   id: string;
   at: string;
-  action: "combo.create" | "combo.update" | "combo.delete" | "connection.toggle" | "bootstrap";
+  action: "combo.create" | "combo.update" | "combo.delete" | "connection.toggle" | "bootstrap" | "key.scope";
   objectId: string;
   objectName: string;
   before: unknown;

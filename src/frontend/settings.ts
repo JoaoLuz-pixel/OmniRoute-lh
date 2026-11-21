@@ -13,7 +13,7 @@ export function mountSettings(ctx: PluginFrontendContext, rpc: Rpc, container: H
     "div",
     { class: "orl-callout" },
     h("strong", {}, "One manual step required. "),
-    "After set-up, point LearnHarness's models at the OmniRoute-* combos in Settings → Providers → Custom endpoint. The plugin can't change LearnHarness settings, so this is the only thing you do by hand, once. ",
+    "After set-up, point LearnHarness's models at the OmniRoute-* combos in Settings → Providers → Model API keys → + Add a provider → Custom endpoint. The plugin can't change LearnHarness settings, so this is the only thing you do by hand, once. ",
     h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), openGuide(ctx, rpc)) }, "Open the set-up guide")
   );
   const rowsHost = h("div", {});
@@ -25,7 +25,28 @@ export function mountSettings(ctx: PluginFrontendContext, rpc: Rpc, container: H
     { class: "orl-warning" },
     "Keys and the OmniRoute dashboard password are stored as plain text in this plugin's data folder. If you use a LearnHarness build with Device Sync and sync \"Plugins & their data\", they are copied to your sync endpoint."
   );
-  root.append(intro, rowsHost, h("h3", {}, "OmniRoute"), status, buttons, testOut, warning);
+  const updates = h("div", { class: "orl-updates" });
+  root.append(intro, rowsHost, h("h3", {}, "OmniRoute"), status, buttons, testOut, h("h3", {}, "Plugin updates"), updates, warning);
+
+  type UpdateStatus = { current: string; latest: string | null; available: boolean; pendingRestart: string | null; checkedAt: string | null; error: string | null; mode: "install" | "notify" | "off"; repository: string | null };
+  const renderUpdates = (u: UpdateStatus) => {
+    clear(updates);
+    const sel = h("select", { class: "orl-input", "aria-label": "Plugin updates" }, ...([["install", "Install automatically (signed releases only)"], ["notify", "Tell me, I'll install"], ["off", "Don't check"]] as const).map(([v, l]) => h("option", { value: v, selected: u.mode === v }, l))) as HTMLSelectElement;
+    sel.addEventListener("change", () => void rpc<UpdateStatus>("update.setMode", { mode: sel.value }).then(renderUpdates));
+    const line = u.pendingRestart
+      ? h("p", { class: "orl-ok" }, `Version ${u.pendingRestart} is installed. Restart LearnHarness to finish updating.`)
+      : u.available
+        ? h("p", { class: "orl-warning" }, `Version ${u.latest} is available (you have ${u.current}).`)
+        : h("p", { class: "orl-muted" }, `Version ${u.current}${u.checkedAt ? ` · up to date as of ${new Date(u.checkedAt).toLocaleString()}` : ""}.`);
+    append(updates, h("label", { class: "orl-label" }, "Updates from GitHub releases", sel), line, u.error ? h("p", { class: "orl-error" }, u.error) : null);
+    const row = h("div", { class: "orl-row" });
+    updates.append(row);
+    const slot = h("span", {});
+    row.append(slot);
+    ctx.ui.mountButton(slot, { label: u.available ? "Install update" : "Check now", size: "sm", variant: "outline", onClick: async () => renderUpdates(await rpc<UpdateStatus>("update.check", { install: u.available })) }, { signal });
+    if (u.repository) row.append(h("a", { href: `https://github.com/${u.repository}/releases`, target: "_blank", rel: "noopener noreferrer" }, "Release notes"));
+  };
+  void rpc<UpdateStatus>("update.status").then(renderUpdates).catch(() => undefined);
 
   let settings: PublicSettings | null = null;
   let rowsHandle: ReturnType<PluginFrontendContext["ui"]["mountSettingsRows"]> | null = null;
@@ -177,6 +198,7 @@ export function mountSettings(ctx: PluginFrontendContext, rpc: Rpc, container: H
       void rpc<RuntimeStatus>("runtime.status")
         .then(renderStatus)
         .catch(() => undefined);
+    if (n.topic === "update-installed" || n.topic === "update-available") void rpc<UpdateStatus>("update.status").then(renderUpdates).catch(() => undefined);
     if (n.topic === "runtime-log" && n.data && typeof (n.data as { line?: unknown }).line === "string") testOut.textContent = (n.data as { line: string }).line;
   });
   signal.addEventListener("abort", off, { once: true });

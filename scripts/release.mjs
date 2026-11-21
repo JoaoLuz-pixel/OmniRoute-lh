@@ -4,6 +4,7 @@
 // so extracting it into LearnHarness's plugins folder gives <plugins>/omniroute-lh/dist/.
 // Run `npm run check` first (the npm script does). Never includes data/, keys or sources.
 import { spawnSync } from "node:child_process";
+import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
@@ -33,6 +34,16 @@ try {
   const r = spawnSync(py, ["-I", "-m", "zipfile", "-c", out, manifest.id], { cwd: stage, stdio: "inherit" });
   if (r.status !== 0) throw new Error("zip creation failed (needs Python 3)");
   console.log(`Release package: ${out} (${(fs.statSync(out).size / 1024).toFixed(1)} KB)`);
+  // Sign the zip (Ed25519) so the plugin's self-updater accepts it. The private key never
+  // lives in the repo: OMNIROUTE_LH_SIGNING_KEY or ~/.config/omniroute-lh/release-signing-key.pem.
+  const keyFile = process.env.OMNIROUTE_LH_SIGNING_KEY || path.join(os.homedir(), ".config", "omniroute-lh", "release-signing-key.pem");
+  if (!fs.existsSync(keyFile)) throw new Error(`No signing key at ${keyFile}; the self-updater would refuse this release.`);
+  const zip = fs.readFileSync(out);
+  const signature = sign(null, zip, createPrivateKey(fs.readFileSync(keyFile)));
+  const embedded = fs.readFileSync(path.join(root, "src", "backend", "updater.ts"), "utf8").match(/-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----\n/)?.[0];
+  if (!embedded || !verify(null, zip, createPublicKey(embedded), signature)) throw new Error("The signing key doesn't match the public key embedded in the plugin.");
+  fs.writeFileSync(`${out}.sig`, signature.toString("base64") + "\n");
+  console.log(`Signature: ${out}.sig (verified against the embedded public key)`);
 } finally {
   fs.rmSync(stage, { recursive: true, force: true });
 }

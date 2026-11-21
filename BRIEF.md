@@ -99,7 +99,7 @@ If a LearnHarness checkout is available, the guide as it was in v0.6.1 is `git s
 ### 4.2 "Set up OmniRoute" guide (a view or dialog)
 Step by step, with a copy button for the address:
 1. In OmniRoute: create an inference key for LearnHarness, and a separate manage-scoped key for this plugin.
-2. In LearnHarness: Settings → Providers → **Custom endpoint**. Base URL `http://<host>:20128/v1` (LearnHarness does not append `/v1`), mode **API key**, the inference key.
+2. In LearnHarness: Settings → Providers → Model API keys → **+ Add a provider** → **Custom endpoint**. Base URL `http://<host>:20128/v1` (LearnHarness does not append `/v1`), mode **API key**, the inference key.
 3. Optionally let the plugin **create the LearnHarness combos** (one per role), starting from a sensible default chain the user can edit first. Show exactly what will be created and ask for confirmation. Skip any that already exist.
 4. Connect, then pick those combos for the Strong, Cheap and Vision models.
 5. List all combos the plugin found (from `/v1/models` or `/api/combos`), marking the LearnHarness ones, so the user knows which names to pick.
@@ -166,7 +166,7 @@ This is read-only. It cannot change LearnHarness settings or see credentials. A 
 - Any write outside `OmniRoute-*` combos still needs explicit confirmation.
 
 **Disclosure of the one manual step (required).** The plugin can do everything else, but only the user can point LearnHarness's model settings at the `OmniRoute-*` combos. Say this plainly and early, everywhere it matters:
-- **README:** near the top, in a short "One manual step required" box: what to change in LearnHarness (Settings → Providers → Custom endpoint, then the Strong/Cheap/Vision models and any role overrides set to the `OmniRoute-*` combos), why the plugin can't do it (the plugin API can't change LearnHarness settings), and that it is needed only once.
+- **README:** near the top, in a short "One manual step required" box: what to change in LearnHarness (Settings → Providers → Model API keys → + Add a provider → Custom endpoint, then the Strong/Cheap/Vision models and any role overrides set to the `OmniRoute-*` combos), why the plugin can't do it (the plugin API can't change LearnHarness settings), and that it is needed only once.
 - **Plugin description in the manifest** and the **settings page:** one sentence saying the same.
 - **Set-up guide:** a dedicated step with the exact values to pick and copy buttons, then an automatic check through the catalog.
 - **Main view:** until the check passes, a persistent banner: "Routing is not active yet: LearnHarness still uses <models>. Complete the one manual step." with a button that opens the guide. If the check later fails again (the user switched a slot back), the banner returns and names which slot or role.
@@ -205,7 +205,8 @@ The owner wants the plugin to manage the OmniRoute installation: install it on f
   - `INITIAL_PASSWORD` sets the dashboard password on first start;
   - `REQUIRE_API_KEY` makes `/v1/*` require a key.
 - **First-run bootstrap.** On a fresh install (no password, setup not complete), `isAuthRequired` lets **loopback** callers through (`src/shared/utils/apiAuth.ts`). A plugin on the same machine can therefore create the two API keys it needs (LearnHarness inference key + manage key) through `POST /api/keys` before any password exists. Then it either sets a password or asks the user to. Verify the exact onboarding calls in the clone; this is a one-time, user-confirmed action and the only key write the plugin ever makes.
-- **npm 11 blocks install scripts by default.** A plain `npm install -g omniroute` skips OmniRoute's `postinstall`, which copies the platform's native SQLite and TLS binaries into its standalone build. Without it, OmniRoute fails on Windows. Any install the plugin performs must pass `--allow-scripts=omniroute,keytar,onnxruntime-node,@parcel/watcher,@swc/core,protobufjs,esbuild` (the list npm printed for 3.8.54; read it from npm's output rather than hard-coding it).
+- **The npm package ships `INITIAL_PASSWORD=CHANGEME`** in its `.env`, so every npm-installed OmniRoute starts with that public default password (verified live, 3.8.54). The plugin passes its own generated `INITIAL_PASSWORD` in the environment, which overrides the package `.env`. On an instance that already saved `CHANGEME`, first-run setup logs in with it and replaces it (after confirmation).
+- **npm 11 blocks install scripts by default.** A plain `npm install -g omniroute` skips OmniRoute's `postinstall`, which copies the platform's native SQLite and TLS binaries into its standalone build. Without it, OmniRoute fails on Windows. npm 11 **rejects `--allow-scripts` for project-scoped installs** (`EALLOWSCRIPTS`), so the plugin writes the allow-list into its install folder's `package.json` (`"allowScripts": {"omniroute": true, …}`). Verified live with npm 11.20.0.
 
 **Modes** (setting: "How is OmniRoute run?")
 1. **External:** OmniRoute is run by the user (Docker, another machine, already running). The plugin only connects. It never installs, starts or stops anything.
@@ -215,7 +216,7 @@ The owner wants the plugin to manage the OmniRoute installation: install it on f
      - find the system `node`/`npm` (Windows: `where node`, `where npm`; else `which`); if missing, explain and link to nodejs.org instead of failing silently;
      - install with `npm install -g omniroute@<pinned or latest> --allow-scripts=…`, or into a plugin-owned prefix outside the LearnHarness data folder (e.g. `%LOCALAPPDATA%\omniroute-lh\runtime`), so ~1,300 packages are never copied by Device Sync. **Ask the owner which.**
      - afterwards run `omniroute --version` and `omniroute doctor`, and show the result.
-   - **Start** (on server activation): spawn the system `node` with the installed `bin/omniroute.mjs serve --port <port> --no-open --headless`, `ELECTRON_RUN_AS_NODE` removed from the env, output to a rotating log in plugin data, `windowsHide: true`. Wait for `/api/health`, then for `/api/monitoring/health` with the key.
+   - **Start** (on server activation): spawn the system `node` with the installed `bin/omniroute.mjs serve --port <port> --no-open` (**not** `--headless`, which turns off the dashboard the user needs for connecting providers), `OMNIROUTE_SERVER_HOST=127.0.0.1` (OmniRoute otherwise listens on 0.0.0.0 with no API key required), `ELECTRON_RUN_AS_NODE` removed from the env, output to a rotating log in plugin data, `windowsHide: true`. Wait for `/api/health`, then for `/api/monitoring/health` with the key.
    - **Stop:**
      - plugin `cleanup` runs `omniroute stop --port <port>`, then kills the child it spawned. This works on disable and on clean shutdowns;
      - **watchdog for app close:** OmniRoute is launched through a tiny supervisor script shipped in `dist/`. The supervisor is passed the LearnHarness server's PID, checks it every ~2 s, and stops OmniRoute when that PID is gone. This covers Windows, where `cleanup` doesn't run;

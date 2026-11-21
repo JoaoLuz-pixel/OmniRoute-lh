@@ -4,12 +4,14 @@ import assert from "node:assert/strict";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import { OmniRouteClient, OmniRouteError } from "../src/backend/omniroute.ts";
-import { callLogs, editableFingerprint, explorerGet, getCombo, listConnections, testConnection, updateComboGuarded } from "../src/backend/services.ts";
+import { callLogs, comboOnlyScope, setInferenceKeyScope, editableFingerprint, explorerGet, getCombo, listConnections, testConnection, updateComboGuarded } from "../src/backend/services.ts";
 
 const MANAGE = "om-manage-key-123456";
 const INFER = "om-infer-key-1234567";
 let combo = { id: "c1", name: "OmniRoute-Strong", strategy: "priority", isActive: true, models: [{ kind: "model", providerId: "cc", model: "claude-opus", connectionId: "k1" }, "openai/gpt-5"] };
 let lastPatch: unknown = null;
+let lhKey: Record<string, unknown> = { id: "k-lh", name: "LearnHarness", modelAccessMode: "all", allowedModels: [], allowedCombos: [], catalogScope: "all", allowAutoCombos: true, key: "sk-masked****" };
+let keyPatches = 0;
 let server: http.Server;
 let base = "";
 
@@ -27,7 +29,7 @@ before(async () => {
       if (url.pathname === "/api/health") return json(200, { status: "ok", timestamp: "now" });
       if (auth === `Bearer ${INFER}`) return json(403, { error: { message: "Invalid management token" } });
       if (auth !== `Bearer ${MANAGE}`) return json(401, { error: "Invalid API key" });
-      if (url.pathname === "/api/monitoring/health") return json(200, { appVersion: "3.8.54", buildSha: "abc" });
+      if (url.pathname === "/api/monitoring/health") return json(200, { status: "healthy", version: "3.8.54", system: { version: "3.8.54", buildSha: "abc" } });
       if (url.pathname === "/api/combos" && req.method === "GET") return json(200, { combos: [combo], total: 1 });
       if (url.pathname === "/api/combos/c1" && req.method === "GET") return json(200, combo);
       if (url.pathname === "/api/combos/c1" && req.method === "PATCH") {
@@ -40,6 +42,12 @@ before(async () => {
       if (url.pathname === "/api/usage/call-logs") {
         assert.equal(url.searchParams.get("apiKey"), "LearnHarness");
         return json(200, [{ id: "r1", timestamp: "2026-11-20T10:00:00Z", status: 200, model: "claude-opus", requestedModel: "OmniRoute-Strong", provider: "cc", duration: 1234, tokens: { in: 10, out: 5 }, comboName: "OmniRoute-Strong", apiKeyName: "LearnHarness", resilienceActions: [{}, {}], requestBody: "PROMPT" }]);
+      }
+      if (url.pathname === "/api/keys" && req.method === "GET") return json(200, { keys: [lhKey, { id: "k-m", name: "LearnHarness plugin (manage)" }] });
+      if (url.pathname === "/api/keys/k-lh" && req.method === "PATCH") {
+        keyPatches++;
+        lhKey = { ...lhKey, ...JSON.parse(raw) };
+        return json(200, { message: "ok" });
       }
       if (url.pathname === "/api/usage/history") return json(200, { totalRequests: 3, byApiKey: { x: { apiKey: "sk-should-not-leak-000000000000" } } });
       if (url.pathname === "/api/stream") {
@@ -109,4 +117,17 @@ test("explorer: redacts, refuses denied paths and unfilled path params", async (
   assert.equal(JSON.stringify(data).includes("sk-should-not-leak"), false);
   await assert.rejects(explorerGet(client(), "/api/keys", {}), (e: OmniRouteError) => e.kind === "invalid-input");
   await assert.rejects(explorerGet(client(), "/api/combos/{id}", {}), (e: OmniRouteError) => e.kind === "invalid-input");
+});
+
+test("LearnHarness key scope: restrict to the plugin's combos, idempotent, ambiguous names refused", async () => {
+  const scope = comboOnlyScope(["OmniRoute-Vision", "OmniRoute-Strong", "OmniRoute-Cheap"]);
+  const r = await setInferenceKeyScope(client(), "LearnHarness", scope);
+  assert.ok(r);
+  assert.equal(r!.before.modelAccessMode, "all");
+  assert.deepEqual(r!.after.allowedCombos, ["OmniRoute-Cheap", "OmniRoute-Strong", "OmniRoute-Vision"]);
+  assert.equal(r!.after.catalogScope, "combos");
+  assert.equal(r!.after.allowAutoCombos, false);
+  assert.equal(await setInferenceKeyScope(client(), "LearnHarness", scope), null, "no second PATCH when already set");
+  assert.equal(keyPatches, 1);
+  await assert.rejects(setInferenceKeyScope(client(), "Nope", scope), (e: OmniRouteError) => e.kind === "not-found");
 });

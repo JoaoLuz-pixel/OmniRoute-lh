@@ -22,7 +22,7 @@ Legend: **R** = read, **W** = write (always confirmed by the user or limited to 
 |---|---|---|
 | R | `GET /api/health` | **No auth.** `{status:"ok", timestamp}`. Proves reachability only. |
 | R | `GET /api/health/ping` | DB-backed readiness; 503 when the DB is down. |
-| R | `GET /api/monitoring/health` | Calls `requireManagementAuth(…, {alwaysRequireAuth:true})`. With a valid manage key it returns the **full view**: `appVersion`, `buildSha`, `catalogCount`, connections, `circuitBreakers`, `rateLimitStatus`, `learnedLimits`, `lockouts`, `quotaMonitorSummary`, `activeSessions`, `activeSessionsByKey`, `credentialHealth`, and more. Otherwise it returns a public subset. **Test connection:** if the full view comes back, the key is valid, and the response also gives the version. |
+| R | `GET /api/monitoring/health` | Calls `requireManagementAuth(…, {alwaysRequireAuth:true})`. With a valid manage key it returns the **full view** (built by `buildHealthPayload`): `version`, `system{version, buildSha, nodeVersion, uptime, …}`, connections, `circuitBreakers`, `rateLimitStatus`, `learnedLimits`, `lockouts`, `quotaMonitorSummary`, `activeSessions`, `activeSessionsByKey`, `credentialHealth`, and more. Otherwise it returns a public subset. **Test connection (verified live):** the key's validity is checked with a manage-only route (`GET /api/combos?limit=1`), and the version is read from this full view. |
 
 ### Models and combos (the routing lever)
 
@@ -93,17 +93,18 @@ Legend: **R** = read, **W** = write (always confirmed by the user or limited to 
 - `GET /api/usage/route-explain/{id}`, `GET /api/usage/combo-health-autopilot`, `GET /api/usage/combo-scoring-inspector`, `GET /api/usage/combo-forecast`: richer routing insight, candidates for the Routing tab.
 - `GET /api/routing`, `GET /api/fallback`, `GET /api/resilience*`: global routing and fallback settings. **Read-only**, because they are shared with other OmniRoute clients (BRIEF 4.6, point 6).
 
-### First-run bootstrap (managed mode, decision 9)
+### First-run bootstrap (managed mode, decision 9). Verified live against 3.8.54
 
-Verified in the v3.8.54 source; check the exact session and CSRF handling on a live instance.
-1. `GET /api/settings/require-login` returns `{requireLogin, hasPassword, setupComplete, …}`. If there is no password and `setupComplete` is false, OmniRoute is in the **bootstrap window**: loopback callers need no auth (`isAuthRequired`).
-2. `POST /api/settings/require-login` `{password, requireLogin: true}` (`updateRequireLoginSchema`, password ≥4 chars). This is allowed inside the bootstrap window. After it, auth is on.
-3. `POST /api/auth/login` `{password}` returns a dashboard session cookie. There may also be a CSRF step (`/api/auth/csrf`); verify.
-4. `POST /api/keys` `{name: "LearnHarness plugin (manage)", scopes: ["manage"]}` with the session. **A manage-scope key always needs a real credential** (`requireCredentialForManagementScopedKey` → `alwaysRequireAuth`), which is why the password and login come first. The response holds the raw `key` **once**.
-5. `POST /api/keys` `{name: "LearnHarness"}` creates the inference key (no manage scope).
-6. `POST /api/auth/logout`. From then on the plugin uses only the manage key.
-
-Not used: OmniRoute's local CLI machine token (`isCliTokenAuthValid`) is internal to its CLI.
+- **npm installs never have a bootstrap window.** The package's `.env` ships `INITIAL_PASSWORD=CHANGEME`, so `GET /api/settings/require-login` reports `hasPassword: true, setupComplete: true` on a brand-new instance.
+- A plugin-started OmniRoute gets the plugin's generated password as `INITIAL_PASSWORD` in its environment, which overrides the package `.env`.
+- Sequence used by `bootstrapKeys` (`src/backend/services.ts`):
+  1. `GET /api/settings/require-login`. With no password (e.g. Docker): `POST /api/settings/require-login` `{password, requireLogin: true}` from loopback.
+  2. `POST /api/auth/login` `{password}` returns a session cookie (no CSRF step needed). The plugin tries, in order: its stored password, a password the user typed, then `CHANGEME`.
+  3. If `CHANGEME` worked: `POST /api/settings/require-login` `{password: <generated>, currentPassword: "CHANGEME", requireLogin: true}` with the session, then log in again.
+  4. `POST /api/keys` `{name: "LearnHarness plugin (manage)", scopes: ["manage"]}`. **A manage-scope key always needs a real credential**, hence the session. The response holds the raw `key` once.
+  5. `POST /api/keys` `{name: "LearnHarness"}` creates the inference key.
+  6. `POST /api/auth/logout`.
+- Live result: the manage key passes `/api/combos` (list, create, PATCH, delete), `/api/openapi/spec` (233 GET endpoints after the denylist) and `/api/usage/*`. The inference key is refused on manage routes.
 
 ## Explorer denylist (never fetched, even if listed by the spec)
 

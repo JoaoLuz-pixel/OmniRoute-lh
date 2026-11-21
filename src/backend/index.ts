@@ -8,7 +8,10 @@ import { asArray, asRecord, OmniRouteClient, OmniRouteError, optStr } from "./om
 import { redact } from "./redact.ts";
 import { RuntimeManager } from "./runtime.ts";
 import {
-  bootstrapFreshInstall,
+  bootstrapKeys,
+  comboOnlyScope,
+  setInferenceKeyScope,
+  type KeyScope,
   callLogs,
   createCombo,
   deleteComboGuarded,
@@ -27,6 +30,9 @@ import {
   type ComboEdit,
 } from "./services.ts";
 import { applyPatch, SettingsStore, toPublic } from "./settings.ts";
+import { Updater, type UpdateMode } from "./updater.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const TARGETS = [...SLOTS, ...ROLES] as Target[];
 
@@ -42,7 +48,16 @@ export async function activate(ctx: PluginBackendContext) {
   const emit = (topic: string, data?: unknown) => {
     if (!ctx.signal.aborted) ctx.events.emit(topic, data);
   };
+  /** Generated once and saved; passed to a plugin-started OmniRoute as INITIAL_PASSWORD. */
+  const ensureDashboardPassword = () => {
+    const s = settings.get();
+    if (s.dashboardPassword) return s.dashboardPassword;
+    const pw = generatePassword();
+    settings.save({ ...s, dashboardPassword: pw });
+    return pw;
+  };
   const runtime = new RuntimeManager({
+    ensureDashboardPassword,
     dataDirectory: ctx.dataDirectory,
     codeDirectory: ctx.directory,
     signal: ctx.signal,
@@ -56,6 +71,24 @@ export async function activate(ctx: PluginBackendContext) {
     return new OmniRouteClient({ baseUrl: s.baseUrl, key: s.managementKey, signal: ctx.signal, ...opts });
   };
   const owned = () => new Map(Object.entries(state.get().ownedCombos)) as Map<string, Target>;
+  /**
+   * Keep LearnHarness's key limited to the plugin's own combos, so LearnHarness's model
+   * picker shows only OmniRoute-Strong/Cheap/Vision (and role combos). Called after every
+   * change to the plugin's combos. Logged with revert like any other write.
+   */
+  const syncInferenceKeyScope = async (): Promise<{ changed: boolean; combos: string[] }> => {
+    const c = client();
+    const ownedIds = new Set(Object.keys(state.get().ownedCombos));
+    const names = (await listCombos(c)).filter((x) => ownedIds.has(x.id)).map((x) => x.name);
+    if (!names.length) return { changed: false, combos: [] };
+    const keyName = settings.get().inferenceKeyName || "LearnHarness";
+    const r = await setInferenceKeyScope(c, keyName, comboOnlyScope(names));
+    if (r) {
+      changes.add({ action: "key.scope", objectId: r.id, objectName: `API key "${keyName}" (models LearnHarness can see)`, before: r.before, after: r.after });
+      emit("routing-changed");
+    }
+    return { changed: !!r, combos: names };
+  };
   const catalog = async (): Promise<ModelCatalogResponse | null> => ctx.inference.catalog().catch(() => null);
 
   /** Every handler returns Result<T>, so the browser part always gets a plain-language error kind. */
@@ -82,6 +115,21 @@ export async function activate(ctx: PluginBackendContext) {
     return testConnection(typeof input.baseUrl === "string" && input.baseUrl ? input.baseUrl.replace(/\/+$/, "") : s.baseUrl, s.managementKey, ctx.signal);
   });
   /** Explicit user click in the manual step: LearnHarness's Custom endpoint needs this key. */
+  /** Same call LearnHarness's Custom endpoint makes on Connect: GET <base>/v1/models with the key. */
+  handle("keys.testInference", async () => {
+    const s = settings.get();
+    if (!s.inferenceKey) return { ok: false, detail: "No LearnHarness key is stored in the plugin." };
+    const c = new OmniRouteClient({ baseUrl: s.baseUrl, key: s.inferenceKey, signal: ctx.signal, timeoutMs: 10_000 });
+    try {
+      const body = asRecord(await c.getJson("/v1/models"), "model list");
+      const ids = asArray(body.data, "model list").flatMap((m) => (m && typeof m === "object" && typeof (m as { id?: unknown }).id === "string" ? [(m as { id: string }).id] : []));
+      const combos = ids.filter((id) => /^OmniRoute-/.test(id));
+      return { ok: true, detail: `OmniRoute accepts this key and lists ${ids.length} models${combos.length ? `, including ${combos.join(", ")}` : ""}. Paste exactly this key in LearnHarness.` };
+    } catch (error) {
+      return { ok: false, detail: (error as Error).message };
+    }
+  });
+  handle("keys.syncScope", () => syncInferenceKeyScope());
   handle("keys.revealInference", () => {
     const k = settings.get().inferenceKey;
     if (!k) throw new OmniRouteError("not-configured", "No LearnHarness inference key is stored. Paste the one you created in OmniRoute into the settings.");
@@ -115,10 +163,12 @@ export async function activate(ctx: PluginBackendContext) {
     const login = await loginState(s.baseUrl, ctx.signal).catch(() => null);
     let models: string[] = [];
     let combos: ComboSummary[] = [];
+    let connections: { provider: string; name: string; isActive: boolean }[] = [];
     if (s.managementKey) {
       try {
         const c = client();
         combos = (await listCombos(c)).map((x) => summarise(x, owned()));
+        connections = (await listConnections(c)).map(({ provider, name, isActive }) => ({ provider, name, isActive }));
         const m = asRecord(await c.getJson("/v1/models"), "model list");
         models = asArray(m.data, "model list").flatMap((x) => (x && typeof x === "object" && typeof (x as { id?: unknown }).id === "string" ? [(x as { id: string }).id] : []));
       } catch {
@@ -138,6 +188,7 @@ export async function activate(ctx: PluginBackendContext) {
       login,
       hasManagementKey: !!s.managementKey,
       hasInferenceKey: !!s.inferenceKey,
+      connections,
       baseUrl: s.baseUrl,
       customEndpointUrl: `${s.baseUrl}/v1`,
       snapshotAt: st.snapshotAt,
@@ -151,14 +202,27 @@ export async function activate(ctx: PluginBackendContext) {
     if (!cat) throw new OmniRouteError("not-configured", "LearnHarness's model catalog isn't available yet.");
     return state.update((s) => ({ ...s, preferred: takeSnapshot(cat, s.preferred), snapshotAt: new Date().toISOString() })).preferred;
   });
-  handle("setup.bootstrap", async () => {
+  handle("setup.bootstrap", async (input: { password?: string }) => {
     const s = settings.get();
-    const password = generatePassword();
-    const r = await bootstrapFreshInstall(s.baseUrl, ctx.signal, password, s.inferenceKeyName || "LearnHarness");
-    settings.save({ ...settings.get(), managementKey: r.managementKey, inferenceKey: r.inferenceKey, inferenceKeyName: r.inferenceKeyName, dashboardPassword: password });
-    changes.add({ action: "bootstrap", objectId: "omniroute", objectName: "First-run setup", before: null, after: { keys: [r.inferenceKeyName, "LearnHarness plugin (manage)"], password: "set" } });
-    // Shown once to the user (decision 9); the inference key is needed for the one manual step.
-    return { password, inferenceKey: r.inferenceKey };
+    const userPassword = typeof input.password === "string" && input.password.length <= 500 ? input.password : undefined;
+    const r = await bootstrapKeys(s.baseUrl, ctx.signal, {
+      generatedPassword: ensureDashboardPassword(),
+      storedPassword: s.dashboardPassword,
+      userPassword,
+      inferenceKeyName: s.inferenceKeyName || "LearnHarness",
+    });
+    // Only the plugin's own generated password is stored; a password the user typed is not.
+    const keepPassword = r.pluginPassword ?? "";
+    settings.save({ ...settings.get(), managementKey: r.managementKey, inferenceKey: r.inferenceKey, inferenceKeyName: r.inferenceKeyName, dashboardPassword: keepPassword });
+    changes.add({
+      action: "bootstrap",
+      objectId: "omniroute",
+      objectName: "First-run setup",
+      before: null,
+      after: { keys: [r.inferenceKeyName, "LearnHarness plugin (manage)"], password: r.replacedDefaultPassword ? "replaced the shipped default (CHANGEME)" : r.pluginPassword ? "set by the plugin" : "unchanged (yours)" },
+    });
+    // Shown once (decision 9). Not shown when the user's own password was used.
+    return { password: r.pluginPassword, replacedDefaultPassword: r.replacedDefaultPassword };
   });
   handle("setup.createCombo", async (input: { target: Target; models: string[]; adoptExistingId?: string }) => {
     if (!TARGETS.includes(input.target)) throw new OmniRouteError("invalid-input", "Unknown target.");
@@ -168,11 +232,13 @@ export async function activate(ctx: PluginBackendContext) {
       const existing = await getCombo(c, input.adoptExistingId);
       if (existing.name !== name) throw new OmniRouteError("invalid-input", "That combo has a different name.");
       state.update((s) => ({ ...s, ownedCombos: { ...s.ownedCombos, [existing.id]: input.target } }));
+      await syncInferenceKeyScope();
       return summarise(existing, owned());
     }
     const created = await createCombo(c, name, input.models, `Managed by the OmniRoute for LearnHarness plugin (${input.target}).`);
     state.update((s) => ({ ...s, ownedCombos: { ...s.ownedCombos, [created.id]: input.target } }));
     changes.add({ action: "combo.create", objectId: created.id, objectName: created.name, before: null, after: created.raw });
+    await syncInferenceKeyScope();
     emit("routing-changed");
     return summarise(created, owned());
   });
@@ -196,6 +262,7 @@ export async function activate(ctx: PluginBackendContext) {
       return s;
     });
     changes.add({ action: "combo.delete", objectId: before.id, objectName: before.name, before: before.raw, after: null });
+    if (Object.keys(state.get().ownedCombos).length) await syncInferenceKeyScope().catch(() => undefined);
     emit("routing-changed");
     return { deleted: before.id };
   });
@@ -216,7 +283,7 @@ export async function activate(ctx: PluginBackendContext) {
     const [health, usage] = await Promise.allSettled([c.getJson("/api/monitoring/health"), c.getJson("/api/usage/history")]);
     const h = health.status === "fulfilled" ? asRecord(health.value, "health report") : null;
     return {
-      version: h ? optStr(h.appVersion) : null,
+      version: h ? (optStr(h.version) ?? optStr((h.system as Record<string, unknown> | undefined)?.version)) : null,
       health: h ? redact(h, { maxDepth: 4, maxArray: 50 }) : null,
       healthError: health.status === "rejected" ? toError(health.reason) : null,
       usage: usage.status === "fulfilled" ? redact(usage.value, { maxDepth: 6, maxArray: 400 }) : null,
@@ -277,6 +344,12 @@ export async function activate(ctx: PluginBackendContext) {
         await c.request("/api/combos", { method: "POST", body: { name: before.name, models: before.models, strategy: before.strategy ?? "priority", description: before.description } });
         return;
       }
+      case "key.scope": {
+        const b = entry.before as KeyScope | null;
+        if (!b) throw new OmniRouteError("conflict", "Not enough data saved to restore the key.");
+        await c.request(`/api/keys/${encodeURIComponent(entry.objectId)}`, { method: "PATCH", body: b });
+        return;
+      }
       case "connection.toggle": {
         await setConnectionActive(c, entry.objectId, (before as { isActive?: boolean } | null)?.isActive === true);
         return;
@@ -285,6 +358,37 @@ export async function activate(ctx: PluginBackendContext) {
         throw new OmniRouteError("invalid-input", "This change can't be reverted automatically.");
     }
   }
+
+  // ── self-update from GitHub releases (signed) ──────────────────────────
+  const repository = (() => {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(ctx.directory, "manifest.json"), "utf8")) as { repository?: unknown };
+      return typeof m.repository === "string" && /^[\w.-]+\/[\w.-]+$/.test(m.repository) ? m.repository : null;
+    } catch {
+      return null;
+    }
+  })();
+  const updater = new Updater({
+    codeDirectory: ctx.directory,
+    dataDirectory: ctx.dataDirectory,
+    manifest: ctx.manifest,
+    repository,
+    signal: ctx.signal,
+    emit,
+  });
+  handle("update.status", () => updater.status());
+  handle("update.check", (input: { install?: boolean }) => updater.check({ install: input.install === true ? true : undefined }));
+  handle("update.setMode", (input: { mode: UpdateMode }) => updater.setMode(input.mode));
+  const runScheduledCheck = () => {
+    if (ctx.signal.aborted || updater.status().mode === "off") return;
+    void updater.check().catch(() => undefined);
+  };
+  const firstCheck = setTimeout(runScheduledCheck, 60_000);
+  const periodicCheck = setInterval(runScheduledCheck, 6 * 60 * 60 * 1000);
+  ctx.cleanup(() => {
+    clearTimeout(firstCheck);
+    clearInterval(periodicCheck);
+  });
 
   // ── app events ─────────────────────────────────────────────────────────
   const off = ctx.events.on((event) => {
@@ -315,5 +419,10 @@ export async function activate(ctx: PluginBackendContext) {
   ctx.cleanup(() => runtime.onCleanup());
 
   // Managed mode: start OmniRoute with the app (non-blocking; activation must not hang).
-  void runtime.onActivate().then(() => emit("runtime-changed"));
+  // Then keep LearnHarness's key limited to the plugin's combos (background, best effort).
+  void runtime
+    .onActivate()
+    .then(() => emit("runtime-changed"))
+    .then(() => (settings.get().managementKey ? syncInferenceKeyScope() : null))
+    .catch(() => undefined);
 }

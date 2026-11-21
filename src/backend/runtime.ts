@@ -10,6 +10,24 @@ import { cleanEnv, findSystemNode, installedVersion, isPidAlive, omnirouteBinIn,
 /** Install scripts npm 11 blocks by default; omniroute's postinstall is required on Windows. */
 export const ALLOW_SCRIPTS = ["omniroute", "keytar", "onnxruntime-node", "@parcel/watcher", "@swc/core", "protobufjs", "esbuild", "better-sqlite3"];
 
+/**
+ * The plugin-owned install folder's package.json. `allowScripts` is npm 11's
+ * per-project allow-list (npm/rfcs#868); older npm ignores it and runs scripts anyway.
+ * The dependency entry npm adds for omniroute is preserved.
+ */
+export function writeRuntimePackageJson(prefix: string, allow: string[]): void {
+  const file = path.join(prefix, "package.json");
+  let pkg: Record<string, unknown> = {};
+  try {
+    pkg = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    /* new folder */
+  }
+  const allowScripts: Record<string, boolean> = { ...((pkg.allowScripts as Record<string, boolean> | undefined) ?? {}) };
+  for (const name of allow) allowScripts[name] = true;
+  fs.writeFileSync(file, JSON.stringify({ ...pkg, name: "omniroute-lh-runtime", private: true, allowScripts }, null, 2) + "\n");
+}
+
 interface WatchdogState {
   version: 1;
   watchdogPid: number;
@@ -27,6 +45,8 @@ export interface RuntimeDeps {
   codeDirectory: string;
   signal: AbortSignal;
   getSettings: () => Settings;
+  /** The plugin-generated dashboard password, created and saved on first use (decision 9). */
+  ensureDashboardPassword: () => string;
   /** Live progress lines to the browser part (install log, start/stop). */
   emit: (line: string) => void;
 }
@@ -155,19 +175,20 @@ export class RuntimeManager {
       if (!node.npmCli) throw new Error(`Found Node at ${node.nodePath}, but not npm next to it. Reinstall Node.js from https://nodejs.org.`);
       const prefix = runtimeRoot();
       fs.mkdirSync(prefix, { recursive: true });
-      if (!fs.existsSync(path.join(prefix, "package.json"))) {
-        fs.writeFileSync(path.join(prefix, "package.json"), JSON.stringify({ name: "omniroute-lh-runtime", private: true }, null, 2));
-      }
+      // npm 11 refuses --allow-scripts for project-scoped installs (EALLOWSCRIPTS);
+      // the allow-list must live in the install folder's package.json instead.
+      writeRuntimePackageJson(prefix, ALLOW_SCRIPTS);
       this.state = "installing";
       this.lastError = null;
       this.deps.emit(`Installing omniroute@${version} into ${prefix} (this takes a few minutes)…`);
       try {
-        await this.runNpm(node, prefix, ["install", `omniroute@${version}`, "--no-audit", "--no-fund", "--omit=dev", `--allow-scripts=${ALLOW_SCRIPTS.join(",")}`]);
+        await this.runNpm(node, prefix, ["install", `omniroute@${version}`, "--no-audit", "--no-fund", "--omit=dev"]);
         // npm may still report packages whose scripts weren't covered; rebuild those explicitly.
         const pending = await this.uncoveredScripts(node, prefix);
         if (pending.length) {
           this.deps.emit(`Running blocked install scripts: ${pending.join(", ")}`);
-          await this.runNpm(node, prefix, ["rebuild", ...pending, `--allow-scripts=${pending.join(",")}`]);
+          writeRuntimePackageJson(prefix, [...ALLOW_SCRIPTS, ...pending]);
+          await this.runNpm(node, prefix, ["rebuild", ...pending]);
         }
         const v = installedVersion(prefix);
         if (!v) throw new Error("npm finished but OmniRoute isn't in the install folder.");
@@ -206,7 +227,12 @@ export class RuntimeManager {
       const onLine = (b: Buffer) => {
         const text = b.toString("utf8");
         out += text;
-        if (!quiet) for (const line of text.split(/\r?\n/)) if (line.trim()) this.deps.emit(line.slice(0, 500));
+        if (quiet) return;
+        for (const raw of text.split(/\r?\n/)) {
+          const line = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").trimEnd();
+          if (!line.trim() || /not installed$/.test(line)) continue;
+          this.deps.emit(line.slice(0, 500));
+        }
       };
       child.stdout.on("data", onLine);
       child.stderr.on("data", onLine);
@@ -251,7 +277,7 @@ export class RuntimeManager {
         stopFile: this.files.stop,
       };
       const child = spawn(node.nodePath, [watchdog], {
-        env: cleanEnv({ OMNIROUTE_LH_WATCHDOG: JSON.stringify(cfg) }),
+        env: cleanEnv({ OMNIROUTE_LH_WATCHDOG: JSON.stringify(cfg), INITIAL_PASSWORD: this.deps.ensureDashboardPassword() }),
         detached: true,
         stdio: "ignore",
         windowsHide: true,
