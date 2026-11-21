@@ -172,6 +172,57 @@ export async function deleteComboGuarded(client: OmniRouteClient, id: string, ex
 
 export const comboNameFor = (t: Target) => COMBO_NAMES[t];
 
+// ── LearnHarness key scope ────────────────────────────────────────────────
+
+/** The key-policy fields the plugin manages on LearnHarness's key (updateKeyPermissionsSchema, v3.8.54). */
+export interface KeyScope {
+  modelAccessMode: "all" | "restricted";
+  allowedModels: string[];
+  allowedCombos: string[];
+  catalogScope: "all" | "combos" | "models";
+  allowAutoCombos: boolean;
+}
+
+async function findKeyByName(client: OmniRouteClient, name: string): Promise<Record<string, unknown>> {
+  const body = await client.getJson("/api/keys");
+  const list = Array.isArray(body) ? body : asArray(asRecord(body, "key list").keys, "key list");
+  const matches = list.filter((k) => k && typeof k === "object" && (k as { name?: unknown }).name === name) as Record<string, unknown>[];
+  if (matches.length === 0) throw new OmniRouteError("not-found", `OmniRoute has no API key named "${name}". Check the key name in the plugin settings.`);
+  if (matches.length > 1) throw new OmniRouteError("conflict", `OmniRoute has ${matches.length} API keys named "${name}"; rename the extra ones so the plugin knows which one LearnHarness uses.`);
+  return matches[0]!;
+}
+
+function scopeOf(k: Record<string, unknown>): KeyScope {
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  return {
+    modelAccessMode: k.modelAccessMode === "restricted" ? "restricted" : "all",
+    allowedModels: list(k.allowedModels),
+    allowedCombos: list(k.allowedCombos),
+    catalogScope: k.catalogScope === "combos" || k.catalogScope === "models" ? k.catalogScope : "all",
+    allowAutoCombos: k.allowAutoCombos !== false,
+  };
+}
+
+/**
+ * Make LearnHarness's key see and call only the plugin's combos (verified live on 3.8.54:
+ * /v1/models then lists exactly those combos; combos still route to their models; any
+ * other model id is refused with 403). Returns null when nothing had to change.
+ */
+export async function setInferenceKeyScope(client: OmniRouteClient, keyName: string, scope: KeyScope): Promise<{ id: string; before: KeyScope; after: KeyScope } | null> {
+  const k = await findKeyByName(client, keyName);
+  const id = optStr(k.id);
+  if (!id) throw new OmniRouteError("bad-response", "OmniRoute's key list has no id for that key.");
+  const before = scopeOf(k);
+  const same = JSON.stringify({ ...before, allowedCombos: [...before.allowedCombos].sort() }) === JSON.stringify({ ...scope, allowedCombos: [...scope.allowedCombos].sort() });
+  if (same) return null;
+  await client.request(`/api/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: scope });
+  return { id, before, after: scopeOf(await findKeyByName(client, keyName)) };
+}
+
+export function comboOnlyScope(comboNames: string[]): KeyScope {
+  return { modelAccessMode: "restricted", allowedModels: [], allowedCombos: [...new Set(comboNames)].sort(), catalogScope: "combos", allowAutoCombos: false };
+}
+
 // ── connections ───────────────────────────────────────────────────────────
 
 export interface ConnectionSummary {

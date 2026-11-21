@@ -9,6 +9,9 @@ import { redact } from "./redact.ts";
 import { RuntimeManager } from "./runtime.ts";
 import {
   bootstrapKeys,
+  comboOnlyScope,
+  setInferenceKeyScope,
+  type KeyScope,
   callLogs,
   createCombo,
   deleteComboGuarded,
@@ -65,6 +68,24 @@ export async function activate(ctx: PluginBackendContext) {
     return new OmniRouteClient({ baseUrl: s.baseUrl, key: s.managementKey, signal: ctx.signal, ...opts });
   };
   const owned = () => new Map(Object.entries(state.get().ownedCombos)) as Map<string, Target>;
+  /**
+   * Keep LearnHarness's key limited to the plugin's own combos, so LearnHarness's model
+   * picker shows only OmniRoute-Strong/Cheap/Vision (and role combos). Called after every
+   * change to the plugin's combos. Logged with revert like any other write.
+   */
+  const syncInferenceKeyScope = async (): Promise<{ changed: boolean; combos: string[] }> => {
+    const c = client();
+    const ownedIds = new Set(Object.keys(state.get().ownedCombos));
+    const names = (await listCombos(c)).filter((x) => ownedIds.has(x.id)).map((x) => x.name);
+    if (!names.length) return { changed: false, combos: [] };
+    const keyName = settings.get().inferenceKeyName || "LearnHarness";
+    const r = await setInferenceKeyScope(c, keyName, comboOnlyScope(names));
+    if (r) {
+      changes.add({ action: "key.scope", objectId: r.id, objectName: `API key "${keyName}" (models LearnHarness can see)`, before: r.before, after: r.after });
+      emit("routing-changed");
+    }
+    return { changed: !!r, combos: names };
+  };
   const catalog = async (): Promise<ModelCatalogResponse | null> => ctx.inference.catalog().catch(() => null);
 
   /** Every handler returns Result<T>, so the browser part always gets a plain-language error kind. */
@@ -105,6 +126,7 @@ export async function activate(ctx: PluginBackendContext) {
       return { ok: false, detail: (error as Error).message };
     }
   });
+  handle("keys.syncScope", () => syncInferenceKeyScope());
   handle("keys.revealInference", () => {
     const k = settings.get().inferenceKey;
     if (!k) throw new OmniRouteError("not-configured", "No LearnHarness inference key is stored. Paste the one you created in OmniRoute into the settings.");
@@ -207,11 +229,13 @@ export async function activate(ctx: PluginBackendContext) {
       const existing = await getCombo(c, input.adoptExistingId);
       if (existing.name !== name) throw new OmniRouteError("invalid-input", "That combo has a different name.");
       state.update((s) => ({ ...s, ownedCombos: { ...s.ownedCombos, [existing.id]: input.target } }));
+      await syncInferenceKeyScope();
       return summarise(existing, owned());
     }
     const created = await createCombo(c, name, input.models, `Managed by the OmniRoute for LearnHarness plugin (${input.target}).`);
     state.update((s) => ({ ...s, ownedCombos: { ...s.ownedCombos, [created.id]: input.target } }));
     changes.add({ action: "combo.create", objectId: created.id, objectName: created.name, before: null, after: created.raw });
+    await syncInferenceKeyScope();
     emit("routing-changed");
     return summarise(created, owned());
   });
@@ -235,6 +259,7 @@ export async function activate(ctx: PluginBackendContext) {
       return s;
     });
     changes.add({ action: "combo.delete", objectId: before.id, objectName: before.name, before: before.raw, after: null });
+    if (Object.keys(state.get().ownedCombos).length) await syncInferenceKeyScope().catch(() => undefined);
     emit("routing-changed");
     return { deleted: before.id };
   });
@@ -316,6 +341,12 @@ export async function activate(ctx: PluginBackendContext) {
         await c.request("/api/combos", { method: "POST", body: { name: before.name, models: before.models, strategy: before.strategy ?? "priority", description: before.description } });
         return;
       }
+      case "key.scope": {
+        const b = entry.before as KeyScope | null;
+        if (!b) throw new OmniRouteError("conflict", "Not enough data saved to restore the key.");
+        await c.request(`/api/keys/${encodeURIComponent(entry.objectId)}`, { method: "PATCH", body: b });
+        return;
+      }
       case "connection.toggle": {
         await setConnectionActive(c, entry.objectId, (before as { isActive?: boolean } | null)?.isActive === true);
         return;
@@ -354,5 +385,10 @@ export async function activate(ctx: PluginBackendContext) {
   ctx.cleanup(() => runtime.onCleanup());
 
   // Managed mode: start OmniRoute with the app (non-blocking; activation must not hang).
-  void runtime.onActivate().then(() => emit("runtime-changed"));
+  // Then keep LearnHarness's key limited to the plugin's combos (background, best effort).
+  void runtime
+    .onActivate()
+    .then(() => emit("runtime-changed"))
+    .then(() => (settings.get().managementKey ? syncInferenceKeyScope() : null))
+    .catch(() => undefined);
 }

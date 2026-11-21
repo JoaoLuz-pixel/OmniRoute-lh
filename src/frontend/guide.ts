@@ -265,6 +265,15 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
       }, "outline");
       keyRow.append(checkOut);
     }
+    // Only the plugin's combos should show up in LearnHarness's model picker.
+    const scopeRow = h("div", { class: "orl-row" });
+    const scopeOut = h("span", { class: "orl-muted", role: "status" }, "LearnHarness's key is limited to the plugin's combos, so after you Connect, LearnHarness lists only those models.");
+    button(scopeRow, "Apply now", async () => {
+      scopeOut.textContent = "Applying…";
+      const r = await rpc<{ changed: boolean; combos: string[] }>("keys.syncScope");
+      scopeOut.textContent = `${r.changed ? "Done" : "Already set"}: LearnHarness's key can only see ${r.combos.join(", ")}. If LearnHarness still lists other OmniRoute models, open the Custom endpoint row and click Connect again.`;
+    }, "outline");
+    scopeRow.append(scopeOut);
     const picks = h("ul", {}, ...state.plans.map((p) => h("li", {}, `${TARGET_LABEL[p.target]} → `, h("code", {}, p.comboName))));
     s5.append(
       h("p", {}, h("strong", {}, "Do this in LearnHarness: "), "Settings → Providers → Model API keys → + Add a provider → Custom endpoint."),
@@ -275,6 +284,7 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
         copyButton(ctx, row, () => ids, signal);
         return row;
       })(),
+      scopeRow,
       h("p", { class: "orl-muted" }, "Chats that already chose their own model keep it. The OmniRoute screen lists them after their next reply.")
     );
     const check = state.manualStep;
