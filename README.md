@@ -39,7 +39,7 @@ Your AI accounts (Claude Code, GitHub Copilot, API keys, …) must also be conne
 2. In LearnHarness, **Settings → Community plugins** shows the plugins folder. Extract the zip **into that folder**. It contains `omniroute-lh/dist/…`, so you end up with `<plugins folder>/omniroute-lh/dist/manifest.json`.
 3. Refresh the list, enable **OmniRoute for LearnHarness**, and open **OmniRoute** in the sidebar. The set-up guide starts from there.
 
-Updating: replace only `omniroute-lh/dist/`. The `omniroute-lh/data/` folder next to it holds your settings and must be kept. Restart LearnHarness after updating.
+**Updates.** By default the plugin updates itself from this repository's GitHub releases (Settings of the plugin → Plugin updates: install automatically / notify only / off). It installs a release only if the zip carries a valid signature from the project's release key, keeps your `data/` folder, keeps the previous version as `dist.previous`, and asks you to restart LearnHarness. LearnHarness 0.6.5 and later also show an **Update** button for the same releases (Settings → Community plugins). To update by hand, replace only `omniroute-lh/dist/`, keep `omniroute-lh/data/`, then restart LearnHarness.
 
 Managed mode needs **Node.js 22.22.2+ (22.x) or 24–26** on the system. The plugin runs OmniRoute with it, not with LearnHarness's built-in runtime.
 
@@ -58,10 +58,15 @@ npm install
 npm run sdk          # generate LearnHarness v0.6.1 plugin types into .sdk/ (needs ../learnharness with node_modules)
 npm run check        # typecheck + tests + build → dist/
 npm run install:local -- "<plugins folder>"
+npm run release      # check, package and sign release/omniroute-lh-<version>.zip (+ .zip.sig)
 npm run inventory    # regenerate docs/omniroute-endpoints.full.md from ../OmniRoute
 ```
 
 The LearnHarness authoring skill (`learnharness-plugins/`) is only needed while developing. It is git-ignored; download it from **Settings → Community plugins → Download authoring skill**. See [BRIEF.md](BRIEF.md) for the design, [docs/decisions.md](docs/decisions.md) for product decisions and [docs/omniroute-endpoints.md](docs/omniroute-endpoints.md) for the verified OmniRoute API.
+
+### Release signing
+
+`npm run release` signs the zip with the Ed25519 key at `~/.config/omniroute-lh/release-signing-key.pem` (or `$OMNIROUTE_LH_SIGNING_KEY`). The matching public key is embedded in `src/backend/updater.ts`. Attach **both** `omniroute-lh-<version>.zip` and `omniroute-lh-<version>.zip.sig` to a **normal** (not pre-release) GitHub release tagged `v<version>`: GitHub's "latest release", which both updaters read, ignores pre-releases. If the private key is lost, installed copies stop auto-updating and need one manual update to a version with a new public key.
 
 ## License
 

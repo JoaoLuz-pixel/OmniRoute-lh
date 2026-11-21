@@ -66,6 +66,10 @@ export function mountView(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLE
   async function renderBanner(): Promise<void> {
     clear(banner);
     try {
+      const up = await rpc<{ pendingRestart: string | null; available: boolean; latest: string | null; mode: string }>("update.status").catch(() => null);
+      if (up?.pendingRestart) banner.append(h("div", { class: "orl-banner" }, `The plugin was updated to ${up.pendingRestart}. Restart LearnHarness to finish.`));
+      else if (up?.available && up.mode !== "install")
+        banner.append(h("div", { class: "orl-banner" }, `Plugin version ${up.latest} is available. `, h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), ctx.app.openSettings()) }, "Open settings to install it")));
       const [manual, rt] = await Promise.all([rpc<ManualStepStatus | null>("manual.status"), rpc<RuntimeStatus>("runtime.status")]);
       if (rt.state !== "running" && rt.state !== "external") {
         banner.append(h("div", { class: "orl-banner orl-banner-warn" }, `OmniRoute is ${rt.state.replace("-", " ")}. `, link("Open the set-up guide")));
@@ -529,7 +533,7 @@ export function mountView(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLE
     .catch(() => undefined);
   const offN = ctx.onNotification((n) => {
     if (n.topic === "turn-settled" && (tab === "recent" || tab === "overview")) void renderBody();
-    if (n.topic === "turn-settled" || n.topic === "manual-step" || n.topic === "runtime-changed") void renderBanner();
+    if (n.topic === "turn-settled" || n.topic === "manual-step" || n.topic === "runtime-changed" || n.topic === "update-installed" || n.topic === "update-available") void renderBanner();
     if (n.topic === "routing-changed" && tab === "routing") void renderBody();
   });
   const offR = ctx.onResync(() => {

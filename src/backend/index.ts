@@ -30,6 +30,9 @@ import {
   type ComboEdit,
 } from "./services.ts";
 import { applyPatch, SettingsStore, toPublic } from "./settings.ts";
+import { Updater, type UpdateMode } from "./updater.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const TARGETS = [...SLOTS, ...ROLES] as Target[];
 
@@ -355,6 +358,37 @@ export async function activate(ctx: PluginBackendContext) {
         throw new OmniRouteError("invalid-input", "This change can't be reverted automatically.");
     }
   }
+
+  // ── self-update from GitHub releases (signed) ──────────────────────────
+  const repository = (() => {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(ctx.directory, "manifest.json"), "utf8")) as { repository?: unknown };
+      return typeof m.repository === "string" && /^[\w.-]+\/[\w.-]+$/.test(m.repository) ? m.repository : null;
+    } catch {
+      return null;
+    }
+  })();
+  const updater = new Updater({
+    codeDirectory: ctx.directory,
+    dataDirectory: ctx.dataDirectory,
+    manifest: ctx.manifest,
+    repository,
+    signal: ctx.signal,
+    emit,
+  });
+  handle("update.status", () => updater.status());
+  handle("update.check", (input: { install?: boolean }) => updater.check({ install: input.install === true ? true : undefined }));
+  handle("update.setMode", (input: { mode: UpdateMode }) => updater.setMode(input.mode));
+  const runScheduledCheck = () => {
+    if (ctx.signal.aborted || updater.status().mode === "off") return;
+    void updater.check().catch(() => undefined);
+  };
+  const firstCheck = setTimeout(runScheduledCheck, 60_000);
+  const periodicCheck = setInterval(runScheduledCheck, 6 * 60 * 60 * 1000);
+  ctx.cleanup(() => {
+    clearTimeout(firstCheck);
+    clearInterval(periodicCheck);
+  });
 
   // ── app events ─────────────────────────────────────────────────────────
   const off = ctx.events.on((event) => {

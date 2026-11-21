@@ -2,9 +2,11 @@
   "apiVersion": 1,
   "id": "omniroute-lh",
   "name": "OmniRoute for LearnHarness",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "minAppVersion": "0.6.1",
   "description": "Routes LearnHarness's agents through OmniRoute and shows OmniRoute's data in the app. Can install, start and stop OmniRoute for you. Needs one manual step: in Settings → Providers → Model API keys → + Add a provider → Custom endpoint, set LearnHarness's models to the OmniRoute-* combos (the plugin cannot change LearnHarness settings).",
+  "author": "JoaoLuz-pixel",
+  "repository": "JoaoLuz-pixel/OmniRoute-lh",
   "main": "main.js",
   "backend": "backend.cjs",
   "styles": "styles.css"
