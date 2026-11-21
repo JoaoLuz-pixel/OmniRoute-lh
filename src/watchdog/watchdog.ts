@@ -29,7 +29,10 @@ if (!config) {
 }
 const cfg: WatchdogConfig = config;
 
-const childEnv: NodeJS.ProcessEnv = { ...process.env, PORT: String(cfg.port) };
+// Loopback only: OmniRoute otherwise listens on 0.0.0.0 with no API key required.
+// INITIAL_PASSWORD (if set by the plugin) arrives in process.env and overrides the
+// package's shipped default (CHANGEME); it only applies while no password is saved yet.
+const childEnv: NodeJS.ProcessEnv = { ...process.env, PORT: String(cfg.port), OMNIROUTE_SERVER_HOST: "127.0.0.1" };
 delete childEnv.OMNIROUTE_LH_WATCHDOG;
 delete childEnv.ELECTRON_RUN_AS_NODE;
 
@@ -73,7 +76,7 @@ try {
 const startedAt = new Date().toISOString();
 log(`--- ${startedAt} watchdog ${process.pid} starting OmniRoute on port ${cfg.port} (follows LearnHarness PID ${cfg.parentPid ?? "none"})`);
 
-const child: ChildProcess = spawn(cfg.nodePath, [cfg.omnirouteBin, "serve", "--port", String(cfg.port), "--no-open", "--headless"], {
+const child: ChildProcess = spawn(cfg.nodePath, [cfg.omnirouteBin, "serve", "--port", String(cfg.port), "--no-open"], {
   env: childEnv,
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,

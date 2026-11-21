@@ -19,20 +19,25 @@ export async function testConnection(baseUrl: string, key: string, signal: Abort
     return { reachable: false, keyValid: false, version: null, buildSha: null, detail: (error as Error).message };
   }
   if (!key) return { reachable: true, keyValid: false, version: null, buildSha: null, detail: "OmniRoute is reachable. Add a management key to see more." };
-  // /api/monitoring/health returns the full view (with appVersion) only to a valid manage credential.
+  // A manage-only route is the real test (no-auth installs let anything through
+  // /api/monitoring/health's public view). The version comes from the full health view.
   const authed = new OmniRouteClient({ baseUrl, key, signal, timeoutMs: 8000 });
   try {
-    const body = asRecord(await authed.getJson("/api/monitoring/health"), "health report");
-    const version = optStr(body.appVersion);
-    if (!version) {
-      return { reachable: true, keyValid: false, version: null, buildSha: null, detail: "OmniRoute is reachable, but it didn't accept the key as a management key (the response was the public view)." };
-    }
-    // A manage-only route confirms the scope, since no-auth installs let anything through.
     await authed.getJson("/api/combos", { limit: 1 });
-    return { reachable: true, keyValid: true, version, buildSha: optStr(body.buildSha), detail: `Connected to OmniRoute ${version}.` };
   } catch (error) {
     return { reachable: true, keyValid: false, version: null, buildSha: null, detail: (error as Error).message };
   }
+  let version: string | null = null;
+  let buildSha: string | null = null;
+  try {
+    const body = asRecord(await authed.getJson("/api/monitoring/health"), "health report");
+    const system = body.system && typeof body.system === "object" ? (body.system as Record<string, unknown>) : {};
+    version = optStr(body.version) ?? optStr(system.version);
+    buildSha = optStr(system.buildSha);
+  } catch {
+    /* version is optional */
+  }
+  return { reachable: true, keyValid: true, version, buildSha, detail: version ? `Connected to OmniRoute ${version}.` : "Connected to OmniRoute." };
 }
 
 // ── combos ────────────────────────────────────────────────────────────────
@@ -332,23 +337,75 @@ function sessionCookie(headers: Headers): string {
     .join("; ");
 }
 
+/** The dashboard password the npm package ships in its .env (`INITIAL_PASSWORD=CHANGEME`). */
+export const SHIPPED_DEFAULT_PASSWORD = "CHANGEME";
+
+export interface BootstrapResult {
+  managementKey: string;
+  inferenceKey: string;
+  inferenceKeyName: string;
+  /** Set when the plugin's generated password is now the dashboard password (show it once, store it). */
+  pluginPassword: string | null;
+  /** The shipped default password was found and replaced. */
+  replacedDefaultPassword: boolean;
+}
+
+async function tryLogin(c: OmniRouteClient, password: string): Promise<string | null> {
+  try {
+    const r = await c.request("/api/auth/login", { method: "POST", anonymous: true, body: { password } });
+    return sessionCookie(r.headers) || null;
+  } catch (error) {
+    if (error instanceof OmniRouteError && (error.kind === "unauthorized" || error.kind === "forbidden" || error.kind === "invalid-input")) return null;
+    throw error;
+  }
+}
+
 /**
- * Fresh install only: set the dashboard password, log in, create the manage key and
- * the LearnHarness inference key, log out. Returns the raw keys (shown once, then stored).
+ * First-run set-up (decision 9): get a dashboard session, make sure the dashboard
+ * password isn't the shipped default, then create the manage key and LearnHarness's key.
+ *
+ * - Bootstrap window (no password at all): set `generatedPassword`.
+ * - Otherwise log in with, in order: the plugin's stored password, a password the user
+ *   typed, the shipped default. If the default worked, replace it with `generatedPassword`.
  */
-export async function bootstrapFreshInstall(
+export async function bootstrapKeys(
   baseUrl: string,
   signal: AbortSignal,
-  password: string,
-  inferenceKeyName: string
-): Promise<{ managementKey: string; inferenceKey: string; inferenceKeyName: string }> {
-  const state = await loginState(baseUrl, signal);
-  if (!state.bootstrapWindow) throw new OmniRouteError("conflict", "This OmniRoute is already set up (it has a password). Create the keys in OmniRoute's dashboard and paste them into the plugin settings.");
+  opts: { generatedPassword: string; storedPassword: string; userPassword?: string; inferenceKeyName: string }
+): Promise<BootstrapResult> {
   const c = new OmniRouteClient({ baseUrl, key: "", signal, timeoutMs: 20_000 });
-  await c.request("/api/settings/require-login", { method: "POST", anonymous: true, body: { password, requireLogin: true } });
-  const login = await c.request("/api/auth/login", { method: "POST", anonymous: true, body: { password } });
-  const cookie = sessionCookie(login.headers);
+  const state = await loginState(baseUrl, signal);
+  let cookie: string | null = null;
+  let pluginPassword: string | null = null;
+  let replacedDefaultPassword = false;
+
+  if (state.bootstrapWindow) {
+    await c.request("/api/settings/require-login", { method: "POST", anonymous: true, body: { password: opts.generatedPassword, requireLogin: true } });
+    cookie = await tryLogin(c, opts.generatedPassword);
+    pluginPassword = opts.generatedPassword;
+  } else {
+    const candidates = [opts.storedPassword, opts.userPassword ?? "", SHIPPED_DEFAULT_PASSWORD].filter((p, i, a) => p && a.indexOf(p) === i);
+    for (const p of candidates) {
+      cookie = await tryLogin(c, p);
+      if (!cookie) continue;
+      if (p === opts.storedPassword) pluginPassword = p;
+      if (p === SHIPPED_DEFAULT_PASSWORD) {
+        await c.request("/api/settings/require-login", { method: "POST", anonymous: true, headers: { cookie }, body: { password: opts.generatedPassword, currentPassword: p, requireLogin: true } });
+        replacedDefaultPassword = true;
+        pluginPassword = opts.generatedPassword;
+        cookie = await tryLogin(c, opts.generatedPassword);
+      }
+      break;
+    }
+    if (!cookie) {
+      throw new OmniRouteError(
+        "unauthorized",
+        opts.userPassword ? "That isn't OmniRoute's dashboard password." : "This OmniRoute already has its own dashboard password. Enter it so the plugin can create its keys (it isn't stored)."
+      );
+    }
+  }
   if (!cookie) throw new OmniRouteError("bad-response", "OmniRoute accepted the password but didn't return a session.");
+
   const headers = { cookie };
   const keyOf = (body: unknown) => {
     const k = optStr(asRecord(body, "new key").key);
@@ -356,9 +413,9 @@ export async function bootstrapFreshInstall(
     return k;
   };
   const manage = keyOf((await c.request("/api/keys", { method: "POST", anonymous: true, headers, body: { name: "LearnHarness plugin (manage)", scopes: ["manage"] } })).body);
-  const inference = keyOf((await c.request("/api/keys", { method: "POST", anonymous: true, headers, body: { name: inferenceKeyName } })).body);
+  const inference = keyOf((await c.request("/api/keys", { method: "POST", anonymous: true, headers, body: { name: opts.inferenceKeyName } })).body);
   await c.request("/api/auth/logout", { method: "POST", anonymous: true, headers }).catch(() => undefined);
-  return { managementKey: manage, inferenceKey: inference, inferenceKeyName };
+  return { managementKey: manage, inferenceKey: inference, inferenceKeyName: opts.inferenceKeyName, pluginPassword, replacedDefaultPassword };
 }
 
 export { redact };

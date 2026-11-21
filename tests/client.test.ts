@@ -27,7 +27,7 @@ before(async () => {
       if (url.pathname === "/api/health") return json(200, { status: "ok", timestamp: "now" });
       if (auth === `Bearer ${INFER}`) return json(403, { error: { message: "Invalid management token" } });
       if (auth !== `Bearer ${MANAGE}`) return json(401, { error: "Invalid API key" });
-      if (url.pathname === "/api/monitoring/health") return json(200, { appVersion: "3.8.54", buildSha: "abc" });
+      if (url.pathname === "/api/monitoring/health") return json(200, { status: "healthy", version: "3.8.54", system: { version: "3.8.54", buildSha: "abc" } });
       if (url.pathname === "/api/combos" && req.method === "GET") return json(200, { combos: [combo], total: 1 });
       if (url.pathname === "/api/combos/c1" && req.method === "GET") return json(200, combo);
       if (url.pathname === "/api/combos/c1" && req.method === "PATCH") {

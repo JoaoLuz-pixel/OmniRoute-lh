@@ -2,7 +2,7 @@
   "apiVersion": 1,
   "id": "omniroute-lh",
   "name": "OmniRoute for LearnHarness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "0.6.1",
   "description": "Routes LearnHarness's agents through OmniRoute and shows OmniRoute's data in the app. Can install, start and stop OmniRoute for you. Needs one manual step: in Settings → Providers → Custom endpoint, set LearnHarness's models to the OmniRoute-* combos (the plugin cannot change LearnHarness settings).",
   "main": "main.js",

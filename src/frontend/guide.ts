@@ -115,7 +115,7 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     );
     if (revealedPassword) {
       const pw = revealedPassword;
-      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password — save it in your password manager now. It won't be shown again after you close this guide."), h("code", {}, pw));
+      const shown = h("div", { class: "orl-secret" }, h("p", {}, "OmniRoute dashboard password (sign in at " + state.baseUrl + "/dashboard) — save it in your password manager now. It won't be shown again after you close this guide."), h("code", {}, pw));
       copyButton(ctx, shown, () => pw, signal);
       root.append(shown);
     }
@@ -151,21 +151,29 @@ function renderGuide(ctx: PluginFrontendContext, rpc: Rpc, container: HTMLElemen
     // 2. Keys
     const s2 = h("div", {});
     if (state.hasManagementKey) s2.append(h("p", {}, "✓ The plugin has a management key."));
-    else if (state.login?.bootstrapWindow) {
-      s2.append(h("p", {}, "This OmniRoute is brand new. The plugin can finish its set-up: set a dashboard password, then create LearnHarness's key and a management key for the plugin."));
-      const row = h("div", { class: "orl-row" });
-      s2.append(row);
-      button(row, "Set up OmniRoute for me", async () => {
-        if (!(await confirmDialog(ctx, { title: "Set up this OmniRoute?", body: ["Sets a strong random dashboard password (shown once).", 'Creates two keys: "LearnHarness" (for LearnHarness\'s Custom endpoint) and "LearnHarness plugin (manage)" (for this plugin).', "This is the only time the plugin creates keys."], confirm: "Set up" }))) return;
-        const r = await rpc<{ password: string; inferenceKey: string }>("setup.bootstrap");
-        revealedPassword = r.password;
-        await render();
-      });
-    } else
+    else {
       s2.append(
-        h("p", {}, "This OmniRoute is already set up. In its dashboard (API keys), create a key with the manage scope for this plugin and a normal key named \"LearnHarness\", then paste them in the plugin settings."),
-        h("p", {}, h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), ctx.app.openSettings()) }, "Open plugin settings"))
+        h("p", {}, 'The plugin creates two OmniRoute keys: "LearnHarness" (for LearnHarness\'s Custom endpoint) and "LearnHarness plugin (manage)" (for itself). It signs in to OmniRoute\'s dashboard once to do that.'),
+        h("p", { class: "orl-muted" }, "If OmniRoute still has its shipped default password (CHANGEME) or none at all, the plugin replaces it with a strong random one and shows it to you once.")
       );
+      const pw = h("input", { class: "orl-input", type: "password", autocomplete: "off", placeholder: "Only if you set your own OmniRoute dashboard password", "aria-label": "OmniRoute dashboard password (optional)" }) as HTMLInputElement;
+      const err = h("p", { class: "orl-error", role: "alert" });
+      const row = h("div", { class: "orl-row" });
+      s2.append(h("label", { class: "orl-label" }, "Your OmniRoute dashboard password (optional, not stored):", pw), row, err);
+      button(row, "Set up OmniRoute for me", async () => {
+        if (!(await confirmDialog(ctx, { title: "Create the keys in OmniRoute?", body: ['Creates two keys: "LearnHarness" and "LearnHarness plugin (manage)".', "Replaces OmniRoute's dashboard password only if it is the shipped default (CHANGEME) or missing; the new one is shown once.", "This is the only time the plugin creates keys."], confirm: "Set up" }))) return;
+        err.textContent = "";
+        try {
+          const r = await rpc<{ password: string | null; replacedDefaultPassword: boolean }>("setup.bootstrap", { password: pw.value || undefined });
+          pw.value = "";
+          if (r.password) revealedPassword = r.password;
+          await render();
+        } catch (e) {
+          err.textContent = (e as Error).message;
+        }
+      });
+      s2.append(h("p", { class: "orl-muted" }, "Prefer to do it yourself? Create the two keys in OmniRoute's dashboard and paste them in the ", h("a", { href: "#", onclick: (e: Event) => (e.preventDefault(), ctx.app.openSettings()) }, "plugin settings"), "."));
+    }
     root.append(section(2, "Keys", s2));
     if (!state.hasManagementKey) return;
 

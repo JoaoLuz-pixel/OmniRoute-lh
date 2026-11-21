@@ -8,7 +8,7 @@ import { asArray, asRecord, OmniRouteClient, OmniRouteError, optStr } from "./om
 import { redact } from "./redact.ts";
 import { RuntimeManager } from "./runtime.ts";
 import {
-  bootstrapFreshInstall,
+  bootstrapKeys,
   callLogs,
   createCombo,
   deleteComboGuarded,
@@ -42,7 +42,16 @@ export async function activate(ctx: PluginBackendContext) {
   const emit = (topic: string, data?: unknown) => {
     if (!ctx.signal.aborted) ctx.events.emit(topic, data);
   };
+  /** Generated once and saved; passed to a plugin-started OmniRoute as INITIAL_PASSWORD. */
+  const ensureDashboardPassword = () => {
+    const s = settings.get();
+    if (s.dashboardPassword) return s.dashboardPassword;
+    const pw = generatePassword();
+    settings.save({ ...s, dashboardPassword: pw });
+    return pw;
+  };
   const runtime = new RuntimeManager({
+    ensureDashboardPassword,
     dataDirectory: ctx.dataDirectory,
     codeDirectory: ctx.directory,
     signal: ctx.signal,
@@ -151,14 +160,27 @@ export async function activate(ctx: PluginBackendContext) {
     if (!cat) throw new OmniRouteError("not-configured", "LearnHarness's model catalog isn't available yet.");
     return state.update((s) => ({ ...s, preferred: takeSnapshot(cat, s.preferred), snapshotAt: new Date().toISOString() })).preferred;
   });
-  handle("setup.bootstrap", async () => {
+  handle("setup.bootstrap", async (input: { password?: string }) => {
     const s = settings.get();
-    const password = generatePassword();
-    const r = await bootstrapFreshInstall(s.baseUrl, ctx.signal, password, s.inferenceKeyName || "LearnHarness");
-    settings.save({ ...settings.get(), managementKey: r.managementKey, inferenceKey: r.inferenceKey, inferenceKeyName: r.inferenceKeyName, dashboardPassword: password });
-    changes.add({ action: "bootstrap", objectId: "omniroute", objectName: "First-run setup", before: null, after: { keys: [r.inferenceKeyName, "LearnHarness plugin (manage)"], password: "set" } });
-    // Shown once to the user (decision 9); the inference key is needed for the one manual step.
-    return { password, inferenceKey: r.inferenceKey };
+    const userPassword = typeof input.password === "string" && input.password.length <= 500 ? input.password : undefined;
+    const r = await bootstrapKeys(s.baseUrl, ctx.signal, {
+      generatedPassword: ensureDashboardPassword(),
+      storedPassword: s.dashboardPassword,
+      userPassword,
+      inferenceKeyName: s.inferenceKeyName || "LearnHarness",
+    });
+    // Only the plugin's own generated password is stored; a password the user typed is not.
+    const keepPassword = r.pluginPassword ?? "";
+    settings.save({ ...settings.get(), managementKey: r.managementKey, inferenceKey: r.inferenceKey, inferenceKeyName: r.inferenceKeyName, dashboardPassword: keepPassword });
+    changes.add({
+      action: "bootstrap",
+      objectId: "omniroute",
+      objectName: "First-run setup",
+      before: null,
+      after: { keys: [r.inferenceKeyName, "LearnHarness plugin (manage)"], password: r.replacedDefaultPassword ? "replaced the shipped default (CHANGEME)" : r.pluginPassword ? "set by the plugin" : "unchanged (yours)" },
+    });
+    // Shown once (decision 9). Not shown when the user's own password was used.
+    return { password: r.pluginPassword, replacedDefaultPassword: r.replacedDefaultPassword };
   });
   handle("setup.createCombo", async (input: { target: Target; models: string[]; adoptExistingId?: string }) => {
     if (!TARGETS.includes(input.target)) throw new OmniRouteError("invalid-input", "Unknown target.");
@@ -216,7 +238,7 @@ export async function activate(ctx: PluginBackendContext) {
     const [health, usage] = await Promise.allSettled([c.getJson("/api/monitoring/health"), c.getJson("/api/usage/history")]);
     const h = health.status === "fulfilled" ? asRecord(health.value, "health report") : null;
     return {
-      version: h ? optStr(h.appVersion) : null,
+      version: h ? (optStr(h.version) ?? optStr((h.system as Record<string, unknown> | undefined)?.version)) : null,
       health: h ? redact(h, { maxDepth: 4, maxArray: 50 }) : null,
       healthError: health.status === "rejected" ? toError(health.reason) : null,
       usage: usage.status === "fulfilled" ? redact(usage.value, { maxDepth: 6, maxArray: 400 }) : null,
